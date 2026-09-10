@@ -1,0 +1,6 @@
+@Workbench.Sample_HostAddress = http://localhost:5036
+
+GET {{Workbench.Sample_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
