@@ -14,12 +14,17 @@ namespace Workbench.Extensions;
 public static class WorkbenchBuilderExtensions
 {
     /// <summary>
-    /// Adds Workbench services (metrics collector) with default options.
+    /// Adds Workbench services (metrics collector, request log) with default options.
     /// </summary>
     public static IServiceCollection AddWorkbench(this IServiceCollection services)
     {
         services.Configure<WorkbenchOptions>(_ => { });
         services.TryAddSingleton<WorkbenchMetricsCollector>();
+        services.TryAddSingleton(sp =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkbenchOptions>>().Value;
+            return new RequestLogCollector(opts.RequestLogCapacity);
+        });
         return services;
     }
 
@@ -30,11 +35,16 @@ public static class WorkbenchBuilderExtensions
     {
         services.Configure(configure);
         services.TryAddSingleton<WorkbenchMetricsCollector>();
+        services.TryAddSingleton(sp =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkbenchOptions>>().Value;
+            return new RequestLogCollector(opts.RequestLogCapacity);
+        });
         return services;
     }
 
     /// <summary>
-    /// Adds Workbench services with default options.
+    /// Adds Workbench services with explicit options instance.
     /// </summary>
     public static IServiceCollection AddWorkbench(this IServiceCollection services, WorkbenchOptions options)
     {
@@ -44,6 +54,8 @@ public static class WorkbenchBuilderExtensions
             o.MetricsSampleInterval = options.MetricsSampleInterval;
             o.MetricsHistory = options.MetricsHistory;
             o.EnableHealthReport = options.EnableHealthReport;
+            o.RequestLogCapacity = options.RequestLogCapacity;
+            o.CaptureRequestBody = options.CaptureRequestBody;
         });
     }
 }
@@ -55,10 +67,13 @@ public static class WorkbenchEndpointExtensions
 {
     /// <summary>
     /// Maps the Workbench dashboard at the configured path (default: <c>/workbench</c>).
-    /// Must be called after <c>AddWorkbench</c>.
+    /// Also installs a request-log middleware that must sit before routing.
+    /// Call this early, before <c>MapControllers</c> / <c>MapGrpcService</c>.
     /// </summary>
     public static IApplicationBuilder UseWorkbench(this IApplicationBuilder app)
     {
-        return app.UseMiddleware<WorkbenchMiddleware>();
+        return app
+            .UseMiddleware<RequestLogMiddleware>()
+            .UseMiddleware<WorkbenchMiddleware>();
     }
 }

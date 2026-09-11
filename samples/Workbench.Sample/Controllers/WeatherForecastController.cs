@@ -22,4 +22,53 @@ public class WeatherForecastController : ControllerBase
         })
         .ToArray();
     }
+
+    [HttpGet("{id:int}")]
+    public ActionResult<WeatherForecast> GetById(int id)
+    {
+        if (id < 0 || id >= Summaries.Length)
+            return NotFound($"No forecast with id {id}");
+
+        return new WeatherForecast
+        {
+            Date = DateOnly.FromDateTime(DateTime.Now),
+            TemperatureC = 20 - id,
+            Summary = Summaries[id],
+        };
+    }
+
+    [HttpGet("search")]
+    public ActionResult<dynamic> Search([FromQuery] int min = -20, [FromQuery] int max = 55)
+    {
+        return new
+        {
+            Query = new { Min = min, Max = max },
+            MatchingSummaries = Summaries.Take(Math.Max(0, (max - min) / 10)).ToArray(),
+        };
+    }
+
+    [HttpPost]
+    public ActionResult<WeatherForecast> Create([FromBody] WeatherForecast forecast)
+    {
+        return CreatedAtAction(nameof(GetById), new { id = 3 }, forecast);
+    }
+
+    [HttpPut("{id:int}")]
+    public ActionResult<WeatherForecast> Update(int id, [FromBody] WeatherForecast forecast)
+    {
+        if (id < 0 || id >= Summaries.Length)
+            return NotFound();
+
+        forecast.Date = DateOnly.FromDateTime(DateTime.Now);
+        return forecast;
+    }
+
+    [HttpDelete("{id:int}")]
+    public ActionResult Delete(int id)
+    {
+        if (id < 0 || id >= Summaries.Length)
+            return NotFound();
+
+        return NoContent();
+    }
 }

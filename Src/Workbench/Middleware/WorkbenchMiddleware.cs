@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -75,6 +76,9 @@ public sealed class WorkbenchMiddleware
             case "overview":
                 await WriteJson(context, BuildOverview(context));
                 break;
+            case "endpoints":
+                await WriteJson(context, DiscoverEndpoints(context));
+                break;
             case "health" when _options.EnableHealthReport:
                 await WriteJson(context, await BuildHealthReport(context));
                 break;
@@ -90,39 +94,123 @@ public sealed class WorkbenchMiddleware
         }
     }
 
+    private IEnumerable<EndpointInfo> DiscoverEndpoints(HttpContext context)
+    {
+        var dataSources = context.RequestServices.GetServices<EndpointDataSource>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<EndpointInfo>();
+
+        foreach (var dataSource in dataSources)
+        {
+            foreach (var endpoint in dataSource.Endpoints)
+            {
+                if (endpoint is not RouteEndpoint routeEndpoint)
+                    continue;
+
+                var rawPath = routeEndpoint.RoutePattern.RawText ?? string.Empty;
+                if (!rawPath.StartsWith('/'))
+                    rawPath = "/" + rawPath;
+
+                if (rawPath.StartsWith(_basePath, StringComparison.OrdinalIgnoreCase))
+                    continue; // don't list workbench itself
+
+                var httpMethods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                var methods = httpMethods is null || httpMethods.Count == 0
+                    ? new[] { "ANY" }
+                    : httpMethods.Where(m => !string.Equals(m, "OPTIONS", StringComparison.OrdinalIgnoreCase));
+
+                foreach (var method in methods)
+                {
+                    var key = $"{method} {rawPath}";
+                    if (!seen.Add(key))
+                        continue;
+
+                    result.Add(new EndpointInfo
+                    {
+                        Name = key,
+                        Method = method,
+                        Path = rawPath,
+                        Parameters = ExtractRouteParameters(rawPath).ToArray(),
+                    });
+                }
+            }
+        }
+
+        return result.OrderBy(e => e.Path).ThenBy(e => e.Method);
+    }
+
+    private static IEnumerable<string> ExtractRouteParameters(string path)
+    {
+        var matches = System.Text.RegularExpressions.Regex.Matches(path, @"\{(\w+)([?*]|\:\w+)?\}");
+        var names = new List<string>();
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            if (match.Groups.Count > 1 && !names.Contains(match.Groups[1].Value))
+                names.Add(match.Groups[1].Value);
+        }
+        return names;
+    }
+
     private static async Task StreamEvents(HttpContext context)
     {
-        var options = context.RequestServices.GetRequiredService<IOptions<WorkbenchOptions>>().Value;
-        var interval = options.MetricsSampleInterval;
+        var services  = context.RequestServices;
+        var options   = services.GetRequiredService<IOptions<WorkbenchOptions>>().Value;
+        var requestLog = services.GetService<RequestLogCollector>();
+        var interval  = options.MetricsSampleInterval;
 
-        context.Response.Headers.ContentType = "text/event-stream";
-        context.Response.Headers.CacheControl = "no-cache";
-        context.Response.Headers.Connection = "keep-alive";
+        context.Response.Headers.ContentType   = "text/event-stream";
+        context.Response.Headers.CacheControl   = "no-cache";
+        context.Response.Headers.Connection     = "keep-alive";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
 
         if (!context.RequestAborted.IsCancellationRequested)
         {
             await WriteEvent(context, "overview", BuildOverview(context));
             if (options.EnableHealthReport)
-            {
                 await WriteEvent(context, "health", await BuildHealthReport(context));
-            }
         }
 
-        var timer = new PeriodicTimer(interval);
+        using var timer = new PeriodicTimer(interval);
+        var timerTask = timer.WaitForNextTickAsync(context.RequestAborted).AsTask();
         try
         {
-            while (await timer.WaitForNextTickAsync(context.RequestAborted))
+            while (!context.RequestAborted.IsCancellationRequested)
             {
-                await WriteEvent(context, "overview", BuildOverview(context));
-                if (options.EnableHealthReport)
+                Task? logTask = null;
+                if (requestLog is not null)
+                    logTask = requestLog.WaitToReadAsync(context.RequestAborted).AsTask();
+
+                var tasks = logTask is not null
+                    ? new[] { timerTask, logTask }
+                    : new[] { timerTask };
+
+                await Task.WhenAny(tasks);
+
+                // Drain every pending request-log entry immediately.
+                if (requestLog is not null)
                 {
-                    await WriteEvent(context, "health", await BuildHealthReport(context));
+                    while (requestLog.TryRead(out var entry))
+                    {
+                        if (entry is not null)
+                            await WriteEvent(context, "request", entry);
+                    }
+                }
+
+                // Re-arm the timer ONLY once the previous tick has completed
+                // (PeriodicTimer supports a single waiter at a time).
+                if (timerTask.IsCompleted)
+                {
+                    await WriteEvent(context, "overview", BuildOverview(context));
+                    if (options.EnableHealthReport)
+                        await WriteEvent(context, "health", await BuildHealthReport(context));
+
+                    timerTask = timer.WaitForNextTickAsync(context.RequestAborted).AsTask();
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            // Client disconnected — stop the stream.
+            // Client disconnected.
         }
         finally
         {
@@ -140,6 +228,7 @@ public sealed class WorkbenchMiddleware
     private static object BuildOverview(HttpContext context)
     {
         var collector = context.RequestServices.GetRequiredService<WorkbenchMetricsCollector>();
+        var requestLog = context.RequestServices.GetService<RequestLogCollector>();
         return new
         {
             Process = collector.GetProcessInfo(),
@@ -148,6 +237,7 @@ public sealed class WorkbenchMiddleware
             ServerTimeUtc = DateTimeOffset.UtcNow,
             RefreshIntervalMs = (int)collectorSampleInterval(context).TotalMilliseconds,
             HealthStatus = healthStatusSummary(context),
+            RecentRequests = requestLog is null ? Array.Empty<RequestLogEntry>() : requestLog.GetEntries(),
         };
     }
 

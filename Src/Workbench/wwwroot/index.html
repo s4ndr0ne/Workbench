@@ -201,6 +201,222 @@
   .info-row .key { color: var(--text-dim); white-space: nowrap; }
   .info-row .val { font-weight: 500; text-align: right; word-break: break-all; }
 
+  /* --- REQUEST LOG --- */
+  .log-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-left: 6px;
+    background: var(--accent-dim);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .log-container {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    max-height: 420px;
+    overflow-y: auto;
+  }
+  .log-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry .time { color: var(--text-dim); width: 70px; flex-shrink: 0; }
+  .log-entry .method {
+    width: 52px;
+    flex-shrink: 0;
+    font-weight: 700;
+    text-align: center;
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+  }
+  .method-get    { background: #4f8bf930; color: var(--accent); }
+  .method-post   { background: #22c55e30; color: var(--green); }
+  .method-put    { background: #eab30830; color: var(--yellow); }
+  .method-patch  { background: #f9731630; color: var(--orange); }
+  .method-delete { background: #ef444430; color: var(--red); }
+  .log-entry .path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+  }
+  .log-entry .status {
+    width: 44px;
+    flex-shrink: 0;
+    text-align: right;
+    font-weight: 700;
+  }
+  .status-2xx { color: var(--green); }
+  .status-3xx { color: var(--accent); }
+  .status-4xx { color: var(--yellow); }
+  .status-5xx { color: var(--red); }
+  .log-entry .dur {
+    width: 56px;
+    flex-shrink: 0;
+    text-align: right;
+    color: var(--text-dim);
+  }
+  .log-entry .ip { color: var(--text-dim); width: 110px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
+  .log-entry .body {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #9aa0b8;
+    opacity: .85;
+  }
+  .log-entry .body.none { color: var(--text-dim); opacity: .5; font-style: italic; }
+  .log-detail {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin: 4px 0 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 120px;
+    overflow-y: auto;
+    display: none;
+  }
+  .log-entry { cursor: pointer; }
+  .log-entry:hover { background: var(--bg-card-alt); }
+
+  /* --- API EXPLORER --- */
+  .endpoint {
+    border-bottom: 1px solid var(--border);
+  }
+  .endpoint:last-child { border-bottom: none; }
+  .endpoint-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 8px;
+    cursor: pointer;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+  }
+  .endpoint-head:hover { background: var(--bg-card-alt); }
+  .endpoint-head .method-pill {
+    width: 58px;
+    flex-shrink: 0;
+    text-align: center;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 3px 0;
+    border-radius: 5px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .endpoint-head .path { flex: 1; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+  .endpoint-head .chevron { color: var(--text-dim); transition: transform .15s ease; }
+  .endpoint.open .chevron { transform: rotate(90deg); }
+  .endpoint-body {
+    display: none;
+    padding: 0 8px 16px 78px;
+    gap: 14px;
+  }
+  .endpoint.open .endpoint-body { display: flex; flex-direction: column; }
+
+  .api-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .api-form .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .api-form label {
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 90px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    font-weight: 600;
+  }
+  .api-form input[type="text"], .api-form textarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 8px 10px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    flex: 1;
+    outline: none;
+  }
+  .api-form input[type="text"]:focus, .api-form textarea:focus {
+    border-color: var(--accent);
+  }
+  .api-form textarea { min-height: 70px; resize: vertical; }
+  .api-form select {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 7px 10px;
+    font-size: 12px;
+    font-family: ui-monospace, Menlo, monospace;
+    outline: none;
+  }
+  .send-btn {
+    align-self: flex-start;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: .3px;
+  }
+  .send-btn:hover { background: #5c97ff; }
+  .send-btn:disabled { opacity: .5; cursor: wait; }
+  .api-response {
+    display: none;
+    margin-top: 4px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    overflow: hidden;
+  }
+  .api-response .resp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .api-response .resp-status { font-weight: 700; }
+  .api-response pre {
+    margin: 0;
+    padding: 12px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow-y: auto;
+    color: var(--text-primary);
+  }
+  .status-2xx-text { color: var(--green); }
+  .status-4xx-text { color: var(--yellow); }
+  .status-5xx-text { color: var(--red); }
+
   /* --- LOADING --- */
   .loading {
     display: flex;
@@ -302,6 +518,18 @@
   <div class="card" id="health-card">
     <div class="loading" id="health-loading"><div class="spinner"></div> Loading health…</div>
   </div>
+
+  <div class="section-title">API Explorer</div>
+  <div class="card" id="api-explorer">
+    <div class="loading"><div class="spinner"></div> Loading endpoints…</div>
+  </div>
+
+  <div class="section-title">Request Log <span class="log-count" id="req-count"></span></div>
+  <div class="card">
+    <div class="log-container" id="request-log">
+      <div class="loading"><div class="spinner"></div> Waiting for requests…</div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -318,6 +546,157 @@
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();
   }
+
+  // --- API Explorer ---
+  const VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+  let endpoints = [];
+
+  function methodPillClass(method) {
+    const m = method.toUpperCase();
+    if (m === 'ANY') return 'method-get';
+    return 'method-' + m.toLowerCase();
+  }
+
+  function fillPath(ep) {
+    let path = ep.path;
+    ep.parameters.forEach(name => {
+      const input = document.getElementById('param-' + ep.index + '-' + name);
+      const val = input ? input.value.trim() : '';
+      path = path.replace(new RegExp('\\{' + name + '(\\:[^}]*)?(\\?|\\*)?\\}'), val || ('{' + name + '}'));
+    });
+    return path;
+  }
+
+  function endpointHtml(ep) {
+    const params = ep.parameters.length
+      ? '<div class="row" style="margin-top:6px">'
+        + '<label>Path</label><div style="flex:1;display:flex;gap:8px;flex-wrap:wrap">'
+        + ep.parameters.map(name =>
+            '<input type="text" id="param-' + ep.index + '-' + name + '" placeholder="{' + name + '}" style="flex:0 1 180px" />')
+          .join('')
+        + '</div></div>'
+      : '';
+
+    const methodSelect = ep.method === 'ANY'
+      ? '<select id="verb-' + ep.index + '">' + VERBS.map(v => '<option>' + v + '</option>').join('') + '</select>'
+      : '';
+
+    const bodyRow = ['POST', 'PUT', 'PATCH'].includes(ep.method === 'ANY' ? 'POST' : ep.method)
+      ? '<div class="row"><label>Body</label><textarea id="body-' + ep.index + '" placeholder="{\\n  \\"key\\": \\"value\\"\\n}"></textarea></div>'
+      : '';
+
+    return '<div class="endpoint" id="ep-' + ep.index + '" data-index="' + ep.index + '">'
+      + '<div class="endpoint-head">'
+      + '<span class="method-pill ' + methodPillClass(ep.method) + '">' + ep.method + '</span>'
+      + '<span class="path">' + ep.path + '</span>'
+      + '<span class="chevron">&#9654;</span>'
+      + '</div>'
+      + '<div class="endpoint-body">'
+      + '<div class="api-form">'
+      + (params || '')
+      + (methodSelect ? '<div class="row"><label>Method</label>' + methodSelect + '</div>' : '')
+      + bodyRow
+      + '<div class="row"><button class="send-btn" data-send="' + ep.index + '">Send</button></div>'
+      + '</div>'
+      + '<div class="api-response" id="resp-' + ep.index + '">'
+      + '<div class="resp-head"><span class="resp-status" id="resp-status-' + ep.index + '"></span><span id="resp-time-' + ep.index + '"></span></div>'
+      + '<pre id="resp-body-' + ep.index + '"></pre>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function renderEndpoints() {
+    const box = $('api-explorer');
+    if (!endpoints.length) {
+      box.innerHTML = '<div style="padding:12px; color:var(--text-dim); font-size:13px;">No endpoints discovered. Map some routes first.</div>';
+      return;
+    }
+    box.innerHTML = '<div style="padding:8px 4px 12px; color:var(--text-dim); font-size:12px;">'
+      + endpoints.length + ' endpoints — click to expand and call.</div>'
+      + endpoints.map(endpointHtml).join('');
+  }
+
+  async function loadEndpoints() {
+    try {
+      endpoints = await fetchJSON('api/endpoints');
+      endpoints.forEach((ep, i) => ep.index = i);
+      renderEndpoints();
+    } catch (err) {
+      $('api-explorer').innerHTML = '<div style="padding:12px; color:var(--text-dim); font-size:13px;">Unable to load endpoints: ' + (err.message || err) + '</div>';
+    }
+  }
+
+  function statusTextClass(code) {
+    if (code >= 200 && code < 300) return 'status-2xx-text';
+    if (code >= 400 && code < 500) return 'status-4xx-text';
+    if (code >= 500) return 'status-5xx-text';
+    return '';
+  }
+
+  async function callEndpoint(ep) {
+    const verb = ep.method === 'ANY'
+      ? (document.getElementById('verb-' + ep.index).value || 'GET')
+      : ep.method;
+    const hasBody = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(verb);
+    const bodyInput = document.getElementById('body-' + ep.index);
+    const bodyVal = bodyInput ? bodyInput.value.trim() : '';
+    const url = fillPath(ep);
+
+    const respBox = $('resp-' + ep.index);
+    const respStatus = $('resp-status-' + ep.index);
+    const respTime = $('resp-time-' + ep.index);
+    const respBody = $('resp-body-' + ep.index);
+    respBox.style.display = 'block';
+    respStatus.textContent = '…';
+    respTime.textContent = '';
+
+    const sw = performance.now();
+    try {
+      const headers = {};
+      if (hasBody && bodyVal) {
+        headers['Content-Type'] = 'application/json';
+      }
+      const r = await fetch(url, {
+        method: verb,
+        headers,
+        body: hasBody ? bodyVal : undefined,
+      });
+      const ms = Math.round(performance.now() - sw);
+      const text = await r.text();
+      respStatus.textContent = r.status + ' ' + r.statusText;
+      respStatus.className = 'resp-status ' + statusTextClass(r.status);
+      respTime.textContent = ms + ' ms';
+      respBody.textContent = prettyPrint(text);
+    } catch (err) {
+      respStatus.textContent = 'Network Error';
+      respStatus.className = 'resp-status status-5xx-text';
+      respBody.textContent = err.message || String(err);
+    }
+  }
+
+  function prettyPrint(text) {
+    if (!text) return '(empty response)';
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try { return JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* fallthrough */ }
+    }
+    return text;
+  }
+
+  document.addEventListener('click', function (evt) {
+    const sendBtn = evt.target.closest('[data-send]');
+    if (sendBtn) {
+      const idx = parseInt(sendBtn.getAttribute('data-send'), 10);
+      callEndpoint(endpoints[idx]);
+      return;
+    }
+    const head = evt.target.closest('.endpoint-head');
+    if (head) {
+      head.parentElement.classList.toggle('open');
+    }
+  });
+
+  loadEndpoints();
 
   function showError(msg) {
     errorBanner.textContent = 'Unable to reach Workbench API: ' + msg;
@@ -442,6 +821,74 @@
     card.innerHTML = html;
   }
 
+  // --- Request log ---
+  let reqLog = [];          // newest first
+  let reqInitialized = false;
+
+  function methodClass(method) {
+    return 'method-' + (method || '').toLowerCase();
+  }
+  function statusClass(status) {
+    const s = (status || 0);
+    return s < 300 ? 'status-2xx' : s < 400 ? 'status-3xx' : s < 500 ? 'status-4xx' : 'status-5xx';
+  }
+  function bodyPreview(body) {
+    if (body == null || body === '') return '<span class="body none">— no body —</span>';
+    const t = String(body);
+    return '<span class="body">' + (t.length > 160 ? t.slice(0, 160) + '…' : t) + '</span>';
+  }
+
+  function reqHtml(e) {
+    const t = new Date(e.timestampUtc);
+    const time = t.toLocaleTimeString('it-IT', { hour12: false }) + '.' + String(t.getMilliseconds()).padStart(3, '0');
+    const hasBody = e.requestBody != null && e.requestBody !== '';
+    const safeBody = hasBody
+      ? String(e.requestBody).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      : '';
+    return '<div class="log-entry" data-path="' + (e.path || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '">'
+      + '<span class="time">' + time + '</span>'
+      + '<span class="method ' + methodClass(e.method) + '">' + (e.method || '') + '</span>'
+      + '<span class="path">' + (e.path || '') + '</span>'
+      + '<span class="status ' + statusClass(e.statusCode) + '">' + (e.statusCode ?? '') + '</span>'
+      + '<span class="dur">' + (e.durationMs != null ? e.durationMs + ' ms' : '') + '</span>'
+      + '<span class="ip">' + (e.remoteIp || '') + '</span>'
+      + '</div>'
+      + (hasBody ? '<div class="log-detail">' + safeBody + '</div>' : '');
+  }
+
+  function renderRequestLog() {
+    const box = $('request-log');
+    $('req-count').textContent = reqLog.length ? reqLog.length + ' reqs' : '';
+    if (!reqLog.length) {
+      box.innerHTML = '<div class="loading"><div class="spinner"></div> Waiting for requests…</div>';
+      return;
+    }
+    box.innerHTML = reqLog.map(reqHtml).join('');
+  }
+
+  function addRequestEntry(e) {
+    const existing = reqLog.findIndex(r =>
+      r.timestampUtc === e.timestampUtc && r.traceId === e.traceId);
+    if (existing >= 0) return;
+    reqLog.unshift(e);
+    if (reqLog.length > 500) reqLog.length = 500;
+
+    const box = $('request-log');
+    $('req-count').textContent = reqLog.length + ' reqs';
+    box.insertAdjacentHTML('afterbegin', reqHtml(e));
+    while (box.children.length > 500) box.removeChild(box.lastChild);
+  }
+
+  // toggle : expanded body on click
+  document.addEventListener('click', function (evt) {
+    const entry = evt.target.closest('.log-entry');
+    if (!entry) return;
+    const detail = entry.nextElementSibling;
+    if (detail && detail.classList.contains('log-detail')) {
+      detail.style.display = detail.style.display === 'block' ? 'none' : 'block';
+    }
+  });
+
   // --- SSE real-time stream ---
   const source = new EventSource('api/stream');
 
@@ -491,10 +938,22 @@
       drawLine('chart-cpu',  samples.map(s => ({ value: s.cpuPercent })),   '#4f8bf9', 'last ' + samples.length + ' samples', 100);
       drawLine('chart-mem',  samples.map(s => ({ value: s.workingSetMb })),'#22c55e', 'last ' + samples.length + ' samples');
     }
+
+    // request log (seed once from history snapshot; newest first)
+    if (!reqInitialized) {
+      reqLog = (data.recentRequests || []).slice().sort((a, b) =>
+        new Date(b.timestampUtc) - new Date(a.timestampUtc));
+      reqInitialized = true;
+      renderRequestLog();
+    }
   });
 
   source.addEventListener('health', function (evt) {
     renderHealth(JSON.parse(evt.data));
+  });
+
+  source.addEventListener('request', function (evt) {
+    addRequestEntry(JSON.parse(evt.data));
   });
 
   source.onopen = function () {

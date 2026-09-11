@@ -12,7 +12,10 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 app.UseWorkbench();
 
-app.UseHttpsRedirection();
+if (!builder.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthorization();
 
