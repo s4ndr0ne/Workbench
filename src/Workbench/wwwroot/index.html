@@ -1000,12 +1000,19 @@
   function currentRequest(ep) {
     const verb = $('b-verb') ? $('b-verb').value : ep.method;
     let path = ep.path;
+      let removedOptionalSegment = false;
     document.querySelectorAll('#b-url [data-param]').forEach(inp => {
       const v = inp.value.trim();
       const catchAll = Number(inp.dataset.catchAll);
       const value = catchAll === 2 ? v.split('/').map(encodeURIComponent).join('/') : encodeURIComponent(v);
-      path = path.replace(inp.dataset.template, () => v || catchAll ? value : '{' + inp.dataset.param + '}');
+        if (!v && !catchAll && inp.dataset.template.endsWith('?}')) {
+          path = path.replace(inp.dataset.template, '');
+          removedOptionalSegment = true;
+        } else {
+          path = path.replace(inp.dataset.template, () => v || catchAll ? value : '{' + inp.dataset.param + '}');
+        }
     });
+      if (removedOptionalSegment) path = path.replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/';
     const qs = ($('b-query').value || '').trim().replace(/^\?/, '');
     const url = path + (qs ? '?' + qs : '');
     const headers = {};
@@ -1017,9 +1024,10 @@
   }
   function buildCurl(ep) {
     const r = currentRequest(ep);
-    const parts = ['curl -X ' + r.verb, "'" + location.origin + r.url + "'"];
-    Object.entries(r.headers).forEach(([k, v]) => parts.push("-H '" + k + ': ' + v.replace(/'/g, "'\\''") + "'"));
-    if (r.body) parts.push("--data '" + r.body.replace(/'/g, "'\\''") + "'");
+      const quote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
+      const parts = ['curl -X ' + quote(r.verb), quote(location.origin + r.url)];
+      Object.entries(r.headers).forEach(([k, v]) => parts.push('-H ' + quote(k + ': ' + v)));
+      if (r.body) parts.push('--data ' + quote(r.body));
     return parts.join(' \\\n  ');
   }
   async function sendRequest(ep) {

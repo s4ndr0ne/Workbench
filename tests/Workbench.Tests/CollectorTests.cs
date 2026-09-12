@@ -10,6 +10,14 @@ namespace Workbench.Tests;
 public sealed class CollectorTests
 {
     [Fact]
+    public void Explicit_null_options_are_rejected()
+    {
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentNullException>(() => services.AddWorkbench((Workbench.Options.WorkbenchOptions)null!));
+    }
+
+    [Fact]
     public void Subscribers_receive_independent_bounded_event_streams()
     {
         var collector = new RequestLogCollector(50);

@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
+using Workbench.Middleware;
+using Workbench.Options;
 
 namespace Workbench.Tests;
 
@@ -20,6 +24,22 @@ public sealed class DashboardTests : IClassFixture<WorkbenchHostFixture>
     }
 
     [Fact]
+    public async Task Redirect_preserves_path_base()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.PathBase = "/app";
+        context.Request.Path = "/workbench";
+        var middleware = new WorkbenchMiddleware(
+            _ => Task.CompletedTask,
+            Microsoft.Extensions.Options.Options.Create(new WorkbenchOptions { Authorize = _ => true }));
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status308PermanentRedirect, context.Response.StatusCode);
+        Assert.Equal("/app/workbench/", context.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
     public async Task Dashboard_serves_embedded_index_html()
     {
         var response = await _host.Client.GetAsync("/workbench/");
@@ -28,6 +48,7 @@ public sealed class DashboardTests : IClassFixture<WorkbenchHostFixture>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.StartsWith("text/html", response.Content.Headers.ContentType?.ToString());
         Assert.Contains("<title>Workbench</title>", html);
+        Assert.Contains("<base href=\"/workbench/\">", html);
     }
 
     [Fact]

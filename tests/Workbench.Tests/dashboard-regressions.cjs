@@ -149,7 +149,8 @@ test('catch-all inputs generate single-star encoded and double-star segment-pres
 test('constrained and optional parameters retain their existing behavior with catch-alls', () => {
   const app = dashboard();
   assert.equal(request(app, '/items/{id:int}/{name?}', ['42', 'a/b']).url, '/items/42/a%2Fb');
-  assert.equal(request(app, '/items/{id:int}/{name?}', ['', '']).url, '/items/{id}/{name}');
+  assert.equal(request(app, '/items/{id:int}/{name?}', ['42', '']).url, '/items/42');
+  assert.equal(request(app, '/items/{id:int}/{name?}', ['', '']).url, '/items/{id}');
   assert.equal(request(app, '/files/{id:int}/{**path:nonfile}', ['42', 'a b/c']).url, '/files/42/a%20b/c');
   const ep = { path: '/files/{**path}', method: 'ANY' };
   app.renderBuilder(ep);
@@ -164,6 +165,19 @@ test('constrained and optional parameters retain their existing behavior with ca
   assert.equal(r.body, '{"ok":true}');
   assert.equal(r.headers['Content-Type'], 'application/json');
   assert.match(app.buildCurl(ep), /https:\/\/example\.test\/files\/a\/b\?page=2/);
+});
+
+test('cURL safely quotes URL, header, and body apostrophes', () => {
+  const app = dashboard();
+  app.renderBuilder({ path: '/items/{id}', method: 'POST' });
+  app.inputs()[0].value = "x'; echo unsafe; #";
+  app.element('b-query').value = "q='; echo unsafe; #";
+  app.element('b-headers').value = "X-Test': value'";
+  app.element('b-body').value = "{'value':'safe'}";
+
+  const curl = app.buildCurl({ path: '/items/{id}', method: 'POST' });
+  assert.match(curl, /q='\\''; echo unsafe; #'/);
+  assert.match(curl, /'\\''/);
 });
 
 test('keyboard shortcut submits only the current endpoint after repeated builder changes', async () => {

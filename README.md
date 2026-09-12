@@ -69,6 +69,7 @@ builder.Services.AddWorkbench(options =>
     options.EnableHealthReport = true;
     options.RequestLogCapacity = 500;                     // ring-buffer size
     options.CaptureRequestBody = true;                    // bodies up to 64 KB, multipart excluded
+    options.Authorize = context => context.User.IsInRole("Operations");
 });
 ```
 
@@ -80,6 +81,7 @@ builder.Services.AddWorkbench(options =>
 | `EnableHealthReport` | `true` | Expose the health report (`/api/health`). |
 | `RequestLogCapacity` | `500` | Number of requests kept in memory (50–10,000). |
 | `CaptureRequestBody` | `true` | Capture body bytes as the application reads them (chunked bodies included), without pre-reading or enabling buffering. |
+| `Authorize` | `null` | Optional dashboard authorization predicate. |
 
 Body capture retains at most 64 KB of content. Known-length bodies larger than 64 KB and multipart bodies are excluded; streamed bodies are truncated in the log. Unread body content is not captured. Downstream middleware can still configure request-size limits and enable buffering when needed.
 
@@ -97,21 +99,14 @@ All API endpoints are `GET` only.
 
 ## Securing the dashboard
 
-Workbench exposes process details and request bodies. In production, put it behind authentication or restrict it by network. The simplest approach is a small guard before `UseWorkbench()`:
+Workbench exposes process details and request bodies. By default it is available in Development and returns `401` to anonymous production requests; authenticated production users are allowed. Use `Authorize` to apply a more specific policy:
 
 ```csharp
-app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/workbench"), branch =>
-{
-    branch.Use(async (ctx, next) =>
-    {
-        if (!ctx.User.Identity?.IsAuthenticated ?? true) { ctx.Response.StatusCode = 401; return; }
-        await next();
-    });
-});
-app.UseWorkbench();
+builder.Services.AddWorkbench(options =>
+    options.Authorize = context => context.User.IsInRole("Operations"));
 ```
 
-Or disable body capture with `CaptureRequestBody = false` if payloads may contain secrets.
+Disable body capture with `CaptureRequestBody = false` if payloads may contain secrets.
 
 ## Project layout
 

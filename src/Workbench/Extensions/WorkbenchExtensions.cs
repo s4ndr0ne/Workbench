@@ -37,7 +37,7 @@ public static class WorkbenchBuilderExtensions
                 "MetricsHistory must be at least MetricsSampleInterval and no greater than 7 days.")
             .Validate(
                 options => options.MetricsSampleInterval.Ticks > 0
-                    && (double)(options.MetricsHistory.Ticks / options.MetricsSampleInterval.Ticks) <= 100_000,
+                    && (double)options.MetricsHistory.Ticks / options.MetricsSampleInterval.Ticks <= 100_000,
                 "MetricsHistory and MetricsSampleInterval cannot produce more than 100,000 samples.")
             .Validate(
                 options => options.RequestLogCapacity is >= 50 and <= 10_000,
@@ -60,6 +60,8 @@ public static class WorkbenchBuilderExtensions
     /// </summary>
     public static IServiceCollection AddWorkbench(this IServiceCollection services, WorkbenchOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
         return services.AddWorkbench(o =>
         {
             o.Path = options.Path;
@@ -68,6 +70,7 @@ public static class WorkbenchBuilderExtensions
             o.EnableHealthReport = options.EnableHealthReport;
             o.RequestLogCapacity = options.RequestLogCapacity;
             o.CaptureRequestBody = options.CaptureRequestBody;
+            o.Authorize = options.Authorize;
         });
     }
 }

@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using System.Reflection;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Workbench.Models;
@@ -38,10 +40,21 @@ public sealed class WorkbenchMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         var requestPath = context.Request.Path.Value ?? string.Empty;
+        PathString remainingPath;
 
-        if (!context.Request.Path.StartsWithSegments(_basePath, out var remainingPath))
+        if (_basePath == "/")
+        {
+            remainingPath = context.Request.Path;
+        }
+        else if (!context.Request.Path.StartsWithSegments(_basePath, out remainingPath))
         {
             await _next(context);
+            return;
+        }
+
+        if (!IsAuthorized(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
 
@@ -50,7 +63,7 @@ public sealed class WorkbenchMiddleware
         if (relative.Length == 0 && !requestPath.EndsWith('/'))
         {
             context.Response.StatusCode = StatusCodes.Status308PermanentRedirect;
-            context.Response.Headers.Location = _basePath + "/";
+            context.Response.Headers.Location = context.Request.PathBase + _basePath + "/" + context.Request.QueryString;
             return;
         }
 
@@ -147,6 +160,15 @@ public sealed class WorkbenchMiddleware
         || (basePath == "/"
             ? path.StartsWith('/')
             : path.StartsWith(basePath + "/", StringComparison.OrdinalIgnoreCase));
+
+    private bool IsAuthorized(HttpContext context)
+    {
+        if (_options.Authorize is not null)
+            return _options.Authorize(context);
+
+        var environment = context.RequestServices.GetService<IHostEnvironment>();
+        return environment?.IsDevelopment() == true || context.User.Identity?.IsAuthenticated == true;
+    }
 
     private static async Task StreamEvents(HttpContext context)
     {
@@ -322,23 +344,42 @@ public sealed class WorkbenchMiddleware
         };
     }
 
-    private static async Task ServeDashboard(HttpContext context, string relative)
+    private async Task ServeDashboard(HttpContext context, string relative)
     {
         if (string.IsNullOrEmpty(relative))
         {
             relative = "index.html";
         }
 
-        using var resourceStream = EmbeddedAssets.GetResource(relative) ?? EmbeddedAssets.GetResource("index.html");
+        var resourceStream = EmbeddedAssets.GetResource(relative);
+        var effectivePath = relative;
+        if (resourceStream is null)
+        {
+            resourceStream = EmbeddedAssets.GetResource("index.html");
+            effectivePath = "index.html";
+        }
+
         if (resourceStream is null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
 
-        context.Response.ContentType = ContentTypes.Get(relative);
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        await resourceStream.CopyToAsync(context.Response.Body);
+        using (resourceStream)
+        {
+            context.Response.ContentType = ContentTypes.Get(effectivePath);
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            if (effectivePath == "index.html")
+            {
+                using var reader = new StreamReader(resourceStream);
+                var html = await reader.ReadToEndAsync();
+                var baseUrl = HtmlEncoder.Default.Encode(context.Request.PathBase + _basePath + "/");
+                await context.Response.WriteAsync(html.Replace("<head>", $"<head><base href=\"{baseUrl}\">"));
+                return;
+            }
+
+            await resourceStream.CopyToAsync(context.Response.Body);
+        }
     }
 
     private static async Task WriteJson(HttpContext context, object payload)

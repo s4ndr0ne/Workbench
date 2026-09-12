@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Http;
+
 namespace Workbench.Options;
 
 /// <summary>
@@ -36,4 +38,10 @@ public sealed class WorkbenchOptions
     /// Does not pre-read the body or enable buffering. Defaults to <c>true</c>.
     /// </summary>
     public bool CaptureRequestBody { get; set; } = true;
+
+    /// <summary>
+    /// Optional predicate that authorizes access to the dashboard and its API.
+    /// When omitted, Workbench allows access only in Development or for authenticated users.
+    /// </summary>
+    public Func<HttpContext, bool>? Authorize { get; set; }
 }

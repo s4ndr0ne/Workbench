@@ -41,6 +41,7 @@ public sealed class WorkbenchHostFixture : IAsyncLifetime
         {
             o.Path = BasePath;
             o.MetricsSampleInterval = TimeSpan.FromMilliseconds(200);
+               o.Authorize = _ => true;
         });
 
         _app = builder.Build();
