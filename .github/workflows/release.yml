@@ -1,0 +1,97 @@
+name: Release
+
+# Triggered by pushing a semver tag, e.g.:
+#   git tag v1.0.0 && git push origin v1.0.0
+# Pre-release tags (v1.0.0-beta.1) are marked as pre-release on GitHub.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Pack, publish & release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Resolve version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Releasing $VERSION (prerelease=$([[ "$VERSION" == *-* ]] && echo true || echo false))"
+
+      - name: Restore
+        run: dotnet restore Workbench.slnx
+
+      - name: Build
+        run: dotnet build Workbench.slnx --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        run: dotnet test Workbench.slnx --configuration Release --no-build
+
+      - name: Pack
+        run: dotnet pack src/Workbench/Workbench.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Extract changelog section
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          FILE=release-notes.md
+          # Take the block under "## [VERSION]" up to the next "## [" heading; fall back to a generic line.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on=1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > "$FILE"
+          if [[ ! -s "$FILE" ]]; then
+            echo "Release $VERSION. See CHANGELOG.md for details." > "$FILE"
+          fi
+          {
+            echo ""
+            echo "### Install"
+            echo ""
+            echo '```bash'
+            echo "dotnet add package s4ndr0ne.Workbench --version $VERSION"
+            echo '```'
+          } >> "$FILE"
+
+      - name: Push to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "$GITHUB_TOKEN" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --skip-duplicate
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Workbench ${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          files: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg

@@ -5,4 +5,12 @@
   <Folder Name="/src/">
     <Project Path="src/Workbench/Workbench.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Workbench.Tests/Workbench.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="README.md" />
+    <File Path="CHANGELOG.md" />
+  </Folder>
 </Solution>

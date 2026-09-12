@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>Workbench</RootNamespace>
+    <AssemblyName>Workbench</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <EmbeddedResourceUseDependentUponConvention>false</EmbeddedResourceUseDependentUponConvention>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>s4ndr0ne.Workbench</PackageId>
+    <Title>Workbench</Title>
+    <Description>Drop-in monitoring workbench for ASP.NET Core Web APIs: live runtime metrics, health checks, request log and an API explorer served in-process at /workbench with zero external dependencies.</Description>
+    <PackageTags>aspnetcore;monitoring;dashboard;healthchecks;metrics;diagnostics;observability;middleware;request-log;api-explorer</PackageTags>
+    <PackageReleaseNotes>See https://github.com/s4ndr0ne/Workbench/releases</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot/**/*" />
+    <Content Update="wwwroot/**/*" CopyToOutputDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

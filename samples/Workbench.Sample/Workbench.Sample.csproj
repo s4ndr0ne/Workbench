@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Workbench\Workbench.csproj" />
+    <ProjectReference Include="../../src/Workbench/Workbench.csproj" />
   </ItemGroup>
 
 </Project>

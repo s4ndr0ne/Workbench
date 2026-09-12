@@ -23,6 +23,7 @@ public sealed class RequestLogMiddleware
     private readonly RequestLogCollector _collector;
     private readonly ILogger<RequestLogMiddleware> _logger;
     private readonly string _workbenchPath;
+    private readonly bool _captureBody;
     private static readonly string[] SkippedMethods = ["OPTIONS"];
 
     public RequestLogMiddleware(
@@ -34,7 +35,59 @@ public sealed class RequestLogMiddleware
         _next = next;
         _collector = collector;
         _logger = logger;
-        _workbenchPath = options.Value.Path.TrimEnd('/');
+        _workbenchPath = NormalizeBasePath(options.Value.Path);
+        _captureBody = options.Value.CaptureRequestBody;
+    }
+
+    private static bool ShouldCaptureBody(HttpRequest request, string contentType)
+    {
+        if (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
+            return false;
+
+        if (contentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // ContentLength is null for chunked/streamed bodies: still worth a bounded read.
+        return request.ContentLength switch
+        {
+            null => true,
+            > 0 and <= MaxBodyBytes => true,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Reads at most <see cref="MaxBodyBytes"/> from the stream and decodes it as UTF-8.
+    /// Returns the (possibly truncated) text and the number of bytes actually consumed.
+    /// </summary>
+    private static async Task<(string? Body, long Size)> ReadBodyAsync(Stream body, CancellationToken ct)
+    {
+        var buffer = new byte[MaxBodyBytes + 1];
+        var total = 0;
+        int read;
+        while (total < buffer.Length
+               && (read = await body.ReadAsync(buffer.AsMemory(total, buffer.Length - total), ct)) > 0)
+        {
+            total += read;
+        }
+
+        if (total == 0)
+            return (null, 0);
+
+        if (total > MaxBodyBytes)
+        {
+            var text = Encoding.UTF8.GetString(buffer, 0, (int)MaxBodyBytes) + "\n… (body truncated)";
+            return (text, total);
+        }
+
+        return (Encoding.UTF8.GetString(buffer, 0, total), total);
+    }
+
+    private static string NormalizeBasePath(string path)
+    {
+        return string.IsNullOrWhiteSpace(path)
+            ? "/workbench"
+            : "/" + path.Trim().Trim('/');
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -43,7 +96,7 @@ public sealed class RequestLogMiddleware
         var path = context.Request.Path.Value ?? "";
 
         if (Array.Exists(SkippedMethods, m => string.Equals(m, method, StringComparison.OrdinalIgnoreCase))
-            || path.StartsWith(_workbenchPath, StringComparison.OrdinalIgnoreCase))
+            || context.Request.Path.StartsWithSegments(_workbenchPath))
         {
             await _next(context);
             return;
@@ -54,24 +107,15 @@ public sealed class RequestLogMiddleware
         long requestSize = 0;
         var requestContentType = context.Request.ContentType ?? "";
 
-        if (context.Request.ContentLength is > 0
-            && context.Request.ContentLength <= MaxBodyBytes
-            && !requestContentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase))
+        if (_captureBody && ShouldCaptureBody(context.Request, requestContentType))
         {
             context.Request.EnableBuffering();
-            using var reader = new StreamReader(
-                context.Request.Body,
-                Encoding.UTF8,
-                detectEncodingFromByteOrderMarks: false,
-                leaveOpen: true);
-
-            requestBody = await reader.ReadToEndAsync(context.RequestAborted);
-            requestSize = Encoding.UTF8.GetByteCount(requestBody);
-            if (requestSize > MaxBodyBytes)
-            {
-                requestBody = requestBody[..(int)(MaxBodyBytes / 2)] + "\n… (body truncated)";
-            }
+            (requestBody, requestSize) = await ReadBodyAsync(context.Request.Body, context.RequestAborted);
             context.Request.Body.Position = 0;
+        }
+        else if (context.Request.ContentLength is > 0)
+        {
+            requestSize = context.Request.ContentLength.Value;
         }
 
         var sw = Stopwatch.StartNew();

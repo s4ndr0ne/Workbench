@@ -14,9 +14,10 @@ namespace Workbench.Services;
 public sealed class WorkbenchMetricsCollector : IDisposable
 {
     private readonly TimeSpan _interval;
-    private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+    private readonly DateTimeOffset _startedAt = ReadProcessStartTime();
     private readonly object _lock = new();
     private readonly Queue<MetricsSample> _samples;
+    private readonly int _sampleCapacity;
     private readonly Timer _timer;
     private int _cpuFraction;
 
@@ -24,8 +25,8 @@ public sealed class WorkbenchMetricsCollector : IDisposable
     {
         var value = options.Value;
         _interval = value.MetricsSampleInterval;
-        var capacity = Math.Max(10, (int)(value.MetricsHistory.TotalSeconds / value.MetricsSampleInterval.TotalSeconds));
-        _samples = new Queue<MetricsSample>(capacity);
+        _sampleCapacity = Math.Max(10, (int)(value.MetricsHistory.TotalSeconds / Math.Max(0.1, value.MetricsSampleInterval.TotalSeconds)));
+        _samples = new Queue<MetricsSample>(_sampleCapacity);
         _timer = new Timer(OnTick, null, _interval, _interval);
         OnTick(0);
     }
@@ -43,7 +44,7 @@ public sealed class WorkbenchMetricsCollector : IDisposable
 
     public ProcessInfo GetProcessInfo()
     {
-        var process = Process.GetCurrentProcess();
+        using var process = Process.GetCurrentProcess();
         var elapsed = DateTimeOffset.UtcNow - _startedAt;
 
         return new ProcessInfo
@@ -80,7 +81,7 @@ public sealed class WorkbenchMetricsCollector : IDisposable
             Gen1Collections = GC.CollectionCount(1),
             Gen2Collections = GC.CollectionCount(2),
             TotalBytesAllocatedMb = ToMbNumber(gc.TotalCommittedBytes),
-            HeapSizeMb = ToMbNumber(gc.HeapSizeBytes),
+            HeapSizeMb = ToMbNumber(HeapBytes(gc)),
             TimeInGcPercent = Math.Round(SumPauseDurations(gc) * 100d / uptimeSeconds, 2),
             CpuUsagePercent = Math.Round(cpuPercent / 100d, 1),
         };
@@ -93,19 +94,20 @@ public sealed class WorkbenchMetricsCollector : IDisposable
 
     private void OnTick(object? state)
     {
+        using var process = Process.GetCurrentProcess();
         var sample = new MetricsSample
         {
             TimestampUtc = DateTimeOffset.UtcNow,
             CpuPercent = ReadCpuPercent(),
-            WorkingSetMb = ToMbNumber(Process.GetCurrentProcess().WorkingSet64),
-            ManagedHeapMb = ToMbNumber(GC.GetGCMemoryInfo().HeapSizeBytes),
+            WorkingSetMb = ToMbNumber(process.WorkingSet64),
+            ManagedHeapMb = ToMbNumber(HeapBytes(GC.GetGCMemoryInfo())),
         };
 
         lock (_lock)
         {
             _cpuFraction = (int)Math.Round(sample.CpuPercent * 100);
 
-            if (_samples.Count >= SampleCapacity)
+            if (_samples.Count >= _sampleCapacity)
             {
                 _samples.Dequeue();
             }
@@ -113,8 +115,6 @@ public sealed class WorkbenchMetricsCollector : IDisposable
             _samples.Enqueue(sample);
         }
     }
-
-    private int SampleCapacity => Math.Max(10, (int)(_interval.TotalSeconds * 2 * 60));
 
     private static double ReadCpuPercent()
     {
@@ -128,13 +128,31 @@ public sealed class WorkbenchMetricsCollector : IDisposable
             var endTime = process.TotalProcessorTime;
             var elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;
             var cpuMs = (endTime - startTime).TotalMilliseconds;
-            return Math.Round(cpuMs / elapsedMs * 100d, 2);
+            // Normalise by core count so a fully-loaded machine reads 100%, not N×100%.
+            var percent = cpuMs / elapsedMs / Environment.ProcessorCount * 100d;
+            return Math.Round(Math.Clamp(percent, 0d, 100d), 2);
         }
         catch
         {
             return 0;
         }
     }
+
+    private static DateTimeOffset ReadProcessStartTime()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return new DateTimeOffset(process.StartTime.ToUniversalTime());
+        }
+        catch
+        {
+            return DateTimeOffset.UtcNow;
+        }
+    }
+
+    // HeapSizeBytes is 0 until the first GC has run; fall back to the live allocation count.
+    private static long HeapBytes(GCMemoryInfo gc) => gc.HeapSizeBytes > 0 ? gc.HeapSizeBytes : GC.GetTotalMemory(false);
 
     private static string ToMb(long bytes) => ToMbNumber(bytes).ToString("0.0", CultureInfo.InvariantCulture);
 

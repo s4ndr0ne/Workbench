@@ -39,13 +39,13 @@ public sealed class WorkbenchMiddleware
     {
         var requestPath = context.Request.Path.Value ?? string.Empty;
 
-        if (!requestPath.StartsWith(_basePath, StringComparison.OrdinalIgnoreCase))
+        if (!context.Request.Path.StartsWithSegments(_basePath, out var remainingPath))
         {
             await _next(context);
             return;
         }
 
-        var relative = requestPath[_basePath.Length..].TrimStart('/');
+        var relative = remainingPath.Value?.TrimStart('/') ?? string.Empty;
 
         if (relative.Length == 0 && !requestPath.EndsWith('/'))
         {
@@ -163,6 +163,8 @@ public sealed class WorkbenchMiddleware
         context.Response.Headers.Connection     = "keep-alive";
         context.Response.Headers["X-Accel-Buffering"] = "no";
 
+        using var subscription = requestLog?.Subscribe();
+
         if (!context.RequestAborted.IsCancellationRequested)
         {
             await WriteEvent(context, "overview", BuildOverview(context));
@@ -172,34 +174,36 @@ public sealed class WorkbenchMiddleware
 
         using var timer = new PeriodicTimer(interval);
         var timerTask = timer.WaitForNextTickAsync(context.RequestAborted).AsTask();
+        var logTask = subscription?.WaitToReadAsync(context.RequestAborted).AsTask();
+
         try
         {
             while (!context.RequestAborted.IsCancellationRequested)
             {
-                Task? logTask = null;
-                if (requestLog is not null)
-                    logTask = requestLog.WaitToReadAsync(context.RequestAborted).AsTask();
+                if (logTask is null)
+                    await timerTask;
+                else
+                    await Task.WhenAny(timerTask, logTask);
 
-                var tasks = logTask is not null
-                    ? new[] { timerTask, logTask }
-                    : new[] { timerTask };
-
-                await Task.WhenAny(tasks);
-
-                // Drain every pending request-log entry immediately.
-                if (requestLog is not null)
+                if (logTask?.IsCompleted == true)
                 {
-                    while (requestLog.TryRead(out var entry))
+                    if (!await logTask)
+                        break;
+
+                    while (subscription!.TryRead(out var entry))
                     {
                         if (entry is not null)
                             await WriteEvent(context, "request", entry);
                     }
+
+                    logTask = subscription.WaitToReadAsync(context.RequestAborted).AsTask();
                 }
 
-                // Re-arm the timer ONLY once the previous tick has completed
-                // (PeriodicTimer supports a single waiter at a time).
                 if (timerTask.IsCompleted)
                 {
+                    if (!await timerTask)
+                        break;
+
                     await WriteEvent(context, "overview", BuildOverview(context));
                     if (options.EnableHealthReport)
                         await WriteEvent(context, "health", await BuildHealthReport(context));
@@ -211,10 +215,6 @@ public sealed class WorkbenchMiddleware
         catch (OperationCanceledException)
         {
             // Client disconnected.
-        }
-        finally
-        {
-            timer.Dispose();
         }
     }
 
@@ -312,7 +312,7 @@ public sealed class WorkbenchMiddleware
             relative = "index.html";
         }
 
-        var resourceStream = EmbeddedAssets.GetResource(relative) ?? EmbeddedAssets.GetResource("index.html");
+        using var resourceStream = EmbeddedAssets.GetResource(relative) ?? EmbeddedAssets.GetResource("index.html");
         if (resourceStream is null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -363,22 +363,19 @@ public static class HealthStatusExtension
 public static class EmbeddedAssets
 {
     private static readonly Assembly ThisAssembly = typeof(EmbeddedAssets).Assembly;
-    private static readonly IReadOnlyDictionary<string, Stream> ResourceCache = BuildResourceCache();
+    private static readonly IReadOnlyDictionary<string, byte[]> ResourceCache = BuildResourceCache();
 
     public static Stream? GetResource(string relativePath)
     {
-        if (ResourceCache.TryGetValue(Normalize(relativePath), out var stream))
-        {
-            stream.Position = 0;
-            return stream;
-        }
-        return null;
+        return ResourceCache.TryGetValue(Normalize(relativePath), out var content)
+            ? new MemoryStream(content, writable: false)
+            : null;
     }
 
-    private static IReadOnlyDictionary<string, Stream> BuildResourceCache()
+    private static IReadOnlyDictionary<string, byte[]> BuildResourceCache()
     {
         var rootNs = ThisAssembly.GetName().Name + ".wwwroot";
-        var map = new Dictionary<string, Stream>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var name in ThisAssembly.GetManifestResourceNames())
         {
@@ -386,10 +383,12 @@ public static class EmbeddedAssets
                 continue;
 
             var relative = name[(rootNs.Length + 1)..];
-            var stream = ThisAssembly.GetManifestResourceStream(name);
-            if (stream != null)
+            using var stream = ThisAssembly.GetManifestResourceStream(name);
+            if (stream is not null)
             {
-                map[Normalize(relative)] = stream;
+                using var buffer = new MemoryStream();
+                stream.CopyTo(buffer);
+                map[Normalize(relative)] = buffer.ToArray();
             }
         }
         return map;

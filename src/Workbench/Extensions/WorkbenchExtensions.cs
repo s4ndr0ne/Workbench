@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Workbench.Middleware;
 using Workbench.Options;
 using Workbench.Services;
@@ -17,16 +18,7 @@ public static class WorkbenchBuilderExtensions
     /// Adds Workbench services (metrics collector, request log) with default options.
     /// </summary>
     public static IServiceCollection AddWorkbench(this IServiceCollection services)
-    {
-        services.Configure<WorkbenchOptions>(_ => { });
-        services.TryAddSingleton<WorkbenchMetricsCollector>();
-        services.TryAddSingleton(sp =>
-        {
-            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkbenchOptions>>().Value;
-            return new RequestLogCollector(opts.RequestLogCapacity);
-        });
-        return services;
-    }
+        => services.AddWorkbench(_ => { });
 
     /// <summary>
     /// Adds Workbench services and optionally configures options.
@@ -40,6 +32,8 @@ public static class WorkbenchBuilderExtensions
             var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkbenchOptions>>().Value;
             return new RequestLogCollector(opts.RequestLogCapacity);
         });
+        // Start sampling as soon as the host starts, not when the dashboard is first opened.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, WorkbenchStartupService>());
         return services;
     }
 
@@ -76,4 +70,23 @@ public static class WorkbenchEndpointExtensions
             .UseMiddleware<RequestLogMiddleware>()
             .UseMiddleware<WorkbenchMiddleware>();
     }
+}
+
+/// <summary>
+/// Eagerly resolves the metrics collector at host start-up so the history window
+/// begins filling immediately instead of on the first dashboard request.
+/// </summary>
+internal sealed class WorkbenchStartupService : IHostedService
+{
+    private readonly IServiceProvider _services;
+
+    public WorkbenchStartupService(IServiceProvider services) => _services = services;
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ = _services.GetRequiredService<WorkbenchMetricsCollector>();
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
