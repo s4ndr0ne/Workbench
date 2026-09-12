@@ -31,8 +31,9 @@ public sealed class WorkbenchOptions
     public int RequestLogCapacity { get; set; } = 500;
 
     /// <summary>
-    /// When <c>true</c>, request bodies up to 64 KB are captured and included in the log.
-    /// Defaults to <c>true</c>.
+    /// When <c>true</c>, body bytes read by the application are captured and included in the log,
+    /// retaining at most 64 KB. Known-length bodies larger than 64 KB and multipart bodies are excluded.
+    /// Does not pre-read the body or enable buffering. Defaults to <c>true</c>.
     /// </summary>
     public bool CaptureRequestBody { get; set; } = true;
 }

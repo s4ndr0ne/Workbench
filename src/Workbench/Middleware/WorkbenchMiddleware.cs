@@ -74,7 +74,7 @@ public sealed class WorkbenchMiddleware
         switch (endpoint.TrimEnd('/'))
         {
             case "overview":
-                await WriteJson(context, BuildOverview(context));
+                await WriteJson(context, await BuildOverview(context));
                 break;
             case "endpoints":
                 await WriteJson(context, DiscoverEndpoints(context));
@@ -111,7 +111,7 @@ public sealed class WorkbenchMiddleware
                 if (!rawPath.StartsWith('/'))
                     rawPath = "/" + rawPath;
 
-                if (rawPath.StartsWith(_basePath, StringComparison.OrdinalIgnoreCase))
+                if (IsWorkbenchPath(rawPath, _basePath))
                     continue; // don't list workbench itself
 
                 var httpMethods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
@@ -130,7 +130,10 @@ public sealed class WorkbenchMiddleware
                         Name = key,
                         Method = method,
                         Path = rawPath,
-                        Parameters = ExtractRouteParameters(rawPath).ToArray(),
+                        Parameters = routeEndpoint.RoutePattern.Parameters
+                            .Select(parameter => parameter.Name)
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToArray(),
                     });
                 }
             }
@@ -139,17 +142,11 @@ public sealed class WorkbenchMiddleware
         return result.OrderBy(e => e.Path).ThenBy(e => e.Method);
     }
 
-    private static IEnumerable<string> ExtractRouteParameters(string path)
-    {
-        var matches = System.Text.RegularExpressions.Regex.Matches(path, @"\{(\w+)([?*]|\:\w+)?\}");
-        var names = new List<string>();
-        foreach (System.Text.RegularExpressions.Match match in matches)
-        {
-            if (match.Groups.Count > 1 && !names.Contains(match.Groups[1].Value))
-                names.Add(match.Groups[1].Value);
-        }
-        return names;
-    }
+    private static bool IsWorkbenchPath(string path, string basePath) =>
+        path.Equals(basePath, StringComparison.OrdinalIgnoreCase)
+        || (basePath == "/"
+            ? path.StartsWith('/')
+            : path.StartsWith(basePath + "/", StringComparison.OrdinalIgnoreCase));
 
     private static async Task StreamEvents(HttpContext context)
     {
@@ -164,20 +161,22 @@ public sealed class WorkbenchMiddleware
         context.Response.Headers["X-Accel-Buffering"] = "no";
 
         using var subscription = requestLog?.Subscribe();
-
-        if (!context.RequestAborted.IsCancellationRequested)
-        {
-            await WriteEvent(context, "overview", BuildOverview(context));
-            if (options.EnableHealthReport)
-                await WriteEvent(context, "health", await BuildHealthReport(context));
-        }
-
         using var timer = new PeriodicTimer(interval);
         var timerTask = timer.WaitForNextTickAsync(context.RequestAborted).AsTask();
         var logTask = subscription?.WaitToReadAsync(context.RequestAborted).AsTask();
 
         try
         {
+            if (!context.RequestAborted.IsCancellationRequested)
+            {
+                await WriteEvent(
+                    context,
+                    "overview",
+                    await BuildOverview(context, includeHealthStatus: !options.EnableHealthReport));
+                if (options.EnableHealthReport)
+                    await WriteEvent(context, "health", await BuildHealthReport(context));
+            }
+
             while (!context.RequestAborted.IsCancellationRequested)
             {
                 if (logTask is null)
@@ -204,7 +203,13 @@ public sealed class WorkbenchMiddleware
                     if (!await timerTask)
                         break;
 
-                    await WriteEvent(context, "overview", BuildOverview(context));
+                    await WriteEvent(
+                        context,
+                        "overview",
+                        await BuildOverview(
+                            context,
+                            includeRecentRequests: false,
+                            includeHealthStatus: !options.EnableHealthReport));
                     if (options.EnableHealthReport)
                         await WriteEvent(context, "health", await BuildHealthReport(context));
 
@@ -225,29 +230,37 @@ public sealed class WorkbenchMiddleware
         await context.Response.Body.FlushAsync();
     }
 
-    private static object BuildOverview(HttpContext context)
+    private static async Task<object> BuildOverview(
+        HttpContext context,
+        bool includeRecentRequests = true,
+        bool includeHealthStatus = true)
     {
         var collector = context.RequestServices.GetRequiredService<WorkbenchMetricsCollector>();
         var requestLog = context.RequestServices.GetService<RequestLogCollector>();
+        IReadOnlyList<RequestLogEntry>? recentRequests = includeRecentRequests
+            ? requestLog?.GetEntries() ?? Array.Empty<RequestLogEntry>()
+            : null;
+        var healthStatus = includeHealthStatus ? await HealthStatusSummary(context) : null;
+
         return new
         {
             Process = collector.GetProcessInfo(),
             Runtime = collector.GetRuntimeMetrics(),
             Samples = collector.Samples,
             ServerTimeUtc = DateTimeOffset.UtcNow,
-            RefreshIntervalMs = (int)collectorSampleInterval(context).TotalMilliseconds,
-            HealthStatus = healthStatusSummary(context),
-            RecentRequests = requestLog is null ? Array.Empty<RequestLogEntry>() : requestLog.GetEntries(),
+            RefreshIntervalMs = (int)CollectorSampleInterval(context).TotalMilliseconds,
+            HealthStatus = healthStatus,
+            RecentRequests = recentRequests,
         };
     }
 
-    private static TimeSpan collectorSampleInterval(HttpContext context)
+    private static TimeSpan CollectorSampleInterval(HttpContext context)
     {
         var options = context.RequestServices.GetRequiredService<IOptions<WorkbenchOptions>>().Value;
         return options.MetricsSampleInterval;
     }
 
-    private static string healthStatusSummary(HttpContext context)
+    private static async Task<string> HealthStatusSummary(HttpContext context)
     {
         if (!context.RequestServices.GetRequiredService<IOptions<WorkbenchOptions>>().Value.EnableHealthReport)
         {
@@ -262,8 +275,12 @@ public sealed class WorkbenchMiddleware
 
         try
         {
-            var report = service.CheckHealthAsync().GetAwaiter().GetResult();
+            var report = await service.CheckHealthAsync(context.RequestAborted);
             return HealthStatusExtension.Format(report.Status);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -284,7 +301,7 @@ public sealed class WorkbenchMiddleware
             };
         }
 
-        var report = await service.CheckHealthAsync();
+        var report = await service.CheckHealthAsync(context.RequestAborted);
 
         var entries = report.Entries
             .Select(kv => new HealthEntry

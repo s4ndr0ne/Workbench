@@ -45,6 +45,14 @@ jobs:
       - name: Test
         run: dotnet test Workbench.slnx --configuration Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test dashboard
+        run: node --test tests/Workbench.Tests/dashboard-regressions.cjs
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

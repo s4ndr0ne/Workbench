@@ -25,7 +25,25 @@ public static class WorkbenchBuilderExtensions
     /// </summary>
     public static IServiceCollection AddWorkbench(this IServiceCollection services, Action<WorkbenchOptions> configure)
     {
-        services.Configure(configure);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.AddOptions<WorkbenchOptions>()
+            .Configure(configure)
+            .Validate(
+                options => options.MetricsSampleInterval.Ticks > 0 && options.MetricsSampleInterval >= TimeSpan.FromMilliseconds(100),
+                "MetricsSampleInterval must be at least 100 ms.")
+            .Validate(
+                options => options.MetricsHistory >= options.MetricsSampleInterval && options.MetricsHistory <= TimeSpan.FromDays(7),
+                "MetricsHistory must be at least MetricsSampleInterval and no greater than 7 days.")
+            .Validate(
+                options => options.MetricsSampleInterval.Ticks > 0
+                    && (double)(options.MetricsHistory.Ticks / options.MetricsSampleInterval.Ticks) <= 100_000,
+                "MetricsHistory and MetricsSampleInterval cannot produce more than 100,000 samples.")
+            .Validate(
+                options => options.RequestLogCapacity is >= 50 and <= 10_000,
+                "RequestLogCapacity must be between 50 and 10,000.")
+            .ValidateOnStart();
+
         services.TryAddSingleton<WorkbenchMetricsCollector>();
         services.TryAddSingleton(sp =>
         {

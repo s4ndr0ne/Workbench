@@ -88,11 +88,17 @@ public sealed class DashboardTests : IClassFixture<WorkbenchHostFixture>
 
         Assert.Contains(endpoints, e => e.GetProperty("method").GetString() == "GET" && e.GetProperty("path").GetString() == "/ping");
         Assert.Contains(endpoints, e => e.GetProperty("method").GetString() == "POST" && e.GetProperty("path").GetString() == "/echo");
-        Assert.DoesNotContain(endpoints, e => e.GetProperty("path").GetString()!.StartsWith("/workbench"));
+        Assert.Contains(endpoints, e => e.GetProperty("path").GetString() == "/workbench-other");
+        Assert.DoesNotContain(endpoints, e =>
+        {
+            var path = e.GetProperty("path").GetString()!;
+            return path.Equals("/workbench", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/workbench/", StringComparison.OrdinalIgnoreCase);
+        });
 
-        var items = endpoints.Single(e => e.GetProperty("path").GetString() == "/items/{id:int}");
-        var param = Assert.Single(items.GetProperty("parameters").EnumerateArray());
-        Assert.Equal("id", param.GetString());
+        Assert.Equal("id", SingleParameter(endpoints, "/items/{id:int}"));
+        Assert.Equal("path", SingleParameter(endpoints, "/files/{**path}"));
+        Assert.Equal("name", SingleParameter(endpoints, "/names/{name:minlength(3)}"));
     }
 
     [Fact]
@@ -147,8 +153,49 @@ public sealed class DashboardTests : IClassFixture<WorkbenchHostFixture>
             .Last(e => e.GetProperty("path").GetString() == "/echo");
         var body = logged.GetProperty("requestBody").GetString()!;
 
+        Assert.Equal(70 * 1024, logged.GetProperty("requestSize").GetInt64());
         Assert.StartsWith(new string('x', 64 * 1024), body);
         Assert.EndsWith("\n… (body truncated)", body);
+    }
+
+    [Fact]
+    public async Task Stream_sends_request_history_only_in_initial_overview()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/workbench/api/stream");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = await _host.Client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cts.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        var overviewCount = 0;
+        string? eventName = null;
+        while (overviewCount < 2)
+        {
+            var line = await reader.ReadLineAsync(cts.Token);
+            Assert.NotNull(line);
+
+            if (line.StartsWith("event: ", StringComparison.Ordinal))
+            {
+                eventName = line[7..];
+            }
+            else if (eventName == "overview" && line.StartsWith("data: ", StringComparison.Ordinal))
+            {
+                using var payload = JsonDocument.Parse(line[6..]);
+                overviewCount++;
+                Assert.Equal(
+                    overviewCount == 1,
+                    payload.RootElement.TryGetProperty("recentRequests", out _));
+            }
+        }
+    }
+
+    private static string? SingleParameter(IEnumerable<JsonElement> endpoints, string path)
+    {
+        var endpoint = endpoints.Single(e => e.GetProperty("path").GetString() == path);
+        return Assert.Single(endpoint.GetProperty("parameters").EnumerateArray()).GetString();
     }
 
     private async Task<JsonDocument> GetJson(string url)

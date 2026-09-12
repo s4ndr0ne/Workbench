@@ -75,11 +75,13 @@ builder.Services.AddWorkbench(options =>
 | Option | Default | Description |
 | --- | --- | --- |
 | `Path` | `/workbench` | Base path of the dashboard and its API. |
-| `MetricsSampleInterval` | `5s` | How often runtime metrics are sampled and pushed to the UI. |
-| `MetricsHistory` | `10m` | Length of the rolling metrics window. |
+| `MetricsSampleInterval` | `5s` | How often runtime metrics are sampled and pushed to the UI (minimum 100 ms). |
+| `MetricsHistory` | `10m` | Length of the rolling metrics window (at least the sample interval, maximum 7 days). |
 | `EnableHealthReport` | `true` | Expose the health report (`/api/health`). |
-| `RequestLogCapacity` | `500` | Number of requests kept in memory (minimum 50). |
-| `CaptureRequestBody` | `true` | Buffer and store request bodies (chunked bodies included). |
+| `RequestLogCapacity` | `500` | Number of requests kept in memory (50–10,000). |
+| `CaptureRequestBody` | `true` | Capture body bytes as the application reads them (chunked bodies included), without pre-reading or enabling buffering. |
+
+Body capture retains at most 64 KB of content. Known-length bodies larger than 64 KB and multipart bodies are excluded; streamed bodies are truncated in the log. Unread body content is not captured. Downstream middleware can still configure request-size limits and enable buffering when needed.
 
 ## Endpoints
 
@@ -130,6 +132,7 @@ tests/Workbench.Tests     xunit integration tests (TestServer)
 ```bash
 dotnet build Workbench.slnx
 dotnet test  Workbench.slnx
+node --test tests/Workbench.Tests/dashboard-regressions.cjs  # Node.js 22+
 dotnet run --project samples/Workbench.Sample     # http://localhost:5036/workbench
 ```
 

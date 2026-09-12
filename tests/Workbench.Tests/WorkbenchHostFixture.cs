@@ -53,6 +53,8 @@ public sealed class WorkbenchHostFixture : IAsyncLifetime
             return Results.Text(await reader.ReadToEndAsync(), "application/json");
         });
         _app.MapGet("/items/{id:int}", (int id) => Results.Ok(new { id }));
+        _app.MapGet("/files/{**path}", (string path) => Results.Ok(new { path }));
+        _app.MapGet("/names/{name:minlength(3)}", (string name) => Results.Ok(new { name }));
 
         await _app.StartAsync();
         Client = _app.GetTestClient();

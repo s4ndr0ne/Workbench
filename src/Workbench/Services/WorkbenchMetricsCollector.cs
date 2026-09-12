@@ -19,7 +19,10 @@ public sealed class WorkbenchMetricsCollector : IDisposable
     private readonly Queue<MetricsSample> _samples;
     private readonly int _sampleCapacity;
     private readonly Timer _timer;
+    private TimeSpan _lastProcessorTime;
+    private long _lastSampleTimestamp;
     private int _cpuFraction;
+    private int _sampling;
 
     public WorkbenchMetricsCollector(IOptions<WorkbenchOptions> options)
     {
@@ -27,8 +30,8 @@ public sealed class WorkbenchMetricsCollector : IDisposable
         _interval = value.MetricsSampleInterval;
         _sampleCapacity = Math.Max(10, (int)(value.MetricsHistory.TotalSeconds / Math.Max(0.1, value.MetricsSampleInterval.TotalSeconds)));
         _samples = new Queue<MetricsSample>(_sampleCapacity);
+        OnTick(null);
         _timer = new Timer(OnTick, null, _interval, _interval);
-        OnTick(0);
     }
 
     public IReadOnlyList<MetricsSample> Samples
@@ -80,9 +83,9 @@ public sealed class WorkbenchMetricsCollector : IDisposable
             Gen0Collections = GC.CollectionCount(0),
             Gen1Collections = GC.CollectionCount(1),
             Gen2Collections = GC.CollectionCount(2),
-            TotalBytesAllocatedMb = ToMbNumber(gc.TotalCommittedBytes),
+            TotalBytesAllocatedMb = ToMbNumber(GC.GetTotalAllocatedBytes(false)),
             HeapSizeMb = ToMbNumber(HeapBytes(gc)),
-            TimeInGcPercent = Math.Round(SumPauseDurations(gc) * 100d / uptimeSeconds, 2),
+            TimeInGcPercent = Math.Round(GC.GetTotalPauseDuration().TotalSeconds * 100d / uptimeSeconds, 2),
             CpuUsagePercent = Math.Round(cpuPercent / 100d, 1),
         };
     }
@@ -94,41 +97,54 @@ public sealed class WorkbenchMetricsCollector : IDisposable
 
     private void OnTick(object? state)
     {
-        using var process = Process.GetCurrentProcess();
-        var sample = new MetricsSample
-        {
-            TimestampUtc = DateTimeOffset.UtcNow,
-            CpuPercent = ReadCpuPercent(),
-            WorkingSetMb = ToMbNumber(process.WorkingSet64),
-            ManagedHeapMb = ToMbNumber(HeapBytes(GC.GetGCMemoryInfo())),
-        };
+        if (Interlocked.Exchange(ref _sampling, 1) != 0)
+            return;
 
-        lock (_lock)
-        {
-            _cpuFraction = (int)Math.Round(sample.CpuPercent * 100);
-
-            if (_samples.Count >= _sampleCapacity)
-            {
-                _samples.Dequeue();
-            }
-
-            _samples.Enqueue(sample);
-        }
-    }
-
-    private static double ReadCpuPercent()
-    {
         try
         {
             using var process = Process.GetCurrentProcess();
-            var startTime = process.TotalProcessorTime;
-            var start = DateTime.UtcNow;
-            Thread.Sleep(50);
-            process.Refresh();
-            var endTime = process.TotalProcessorTime;
-            var elapsedMs = (DateTime.UtcNow - start).TotalMilliseconds;
-            var cpuMs = (endTime - startTime).TotalMilliseconds;
-            // Normalise by core count so a fully-loaded machine reads 100%, not N×100%.
+            var sample = new MetricsSample
+            {
+                TimestampUtc = DateTimeOffset.UtcNow,
+                CpuPercent = ReadCpuPercent(process),
+                WorkingSetMb = ToMbNumber(process.WorkingSet64),
+                ManagedHeapMb = ToMbNumber(HeapBytes(GC.GetGCMemoryInfo())),
+            };
+
+            lock (_lock)
+            {
+                _cpuFraction = (int)Math.Round(sample.CpuPercent * 100);
+
+                if (_samples.Count >= _sampleCapacity)
+                {
+                    _samples.Dequeue();
+                }
+
+                _samples.Enqueue(sample);
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _sampling, 0);
+        }
+    }
+
+    private double ReadCpuPercent(Process process)
+    {
+        try
+        {
+            var timestamp = Stopwatch.GetTimestamp();
+            var processorTime = process.TotalProcessorTime;
+            var previousTimestamp = _lastSampleTimestamp;
+            var previousProcessorTime = _lastProcessorTime;
+            _lastSampleTimestamp = timestamp;
+            _lastProcessorTime = processorTime;
+
+            if (previousTimestamp == 0)
+                return 0;
+
+            var elapsedMs = Stopwatch.GetElapsedTime(previousTimestamp, timestamp).TotalMilliseconds;
+            var cpuMs = (processorTime - previousProcessorTime).TotalMilliseconds;
             var percent = cpuMs / elapsedMs / Environment.ProcessorCount * 100d;
             return Math.Round(Math.Clamp(percent, 0d, 100d), 2);
         }
@@ -155,16 +171,6 @@ public sealed class WorkbenchMetricsCollector : IDisposable
     private static long HeapBytes(GCMemoryInfo gc) => gc.HeapSizeBytes > 0 ? gc.HeapSizeBytes : GC.GetTotalMemory(false);
 
     private static string ToMb(long bytes) => ToMbNumber(bytes).ToString("0.0", CultureInfo.InvariantCulture);
-
-    private static double SumPauseDurations(GCMemoryInfo gc)
-    {
-        var total = 0.0;
-        foreach (var pause in gc.PauseDurations)
-        {
-            total += pause.TotalSeconds;
-        }
-        return total;
-    }
 
     private static double ToMbNumber(long bytes) => Math.Round(bytes / 1024d / 1024d, 1);
 

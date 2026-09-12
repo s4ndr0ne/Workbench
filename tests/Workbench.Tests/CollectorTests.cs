@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Workbench.Extensions;
 using Workbench.Middleware;
 using Workbench.Models;
 using Workbench.Services;
@@ -29,6 +32,27 @@ public sealed class CollectorTests
         Assert.Equal("59", firstEntries[^1].TraceId);
     }
 
+    [Theory]
+    [InlineData(0, 600, 500)]
+    [InlineData(50, 600, 500)]
+    [InlineData(200, 100, 500)]
+    [InlineData(200, 600, 49)]
+    [InlineData(100, 604_800_000, 500)]
+    public void Invalid_options_are_rejected(int intervalMs, int historyMs, int requestLogCapacity)
+    {
+        var services = new ServiceCollection();
+        services.AddWorkbench(options =>
+        {
+            options.MetricsSampleInterval = TimeSpan.FromMilliseconds(intervalMs);
+            options.MetricsHistory = TimeSpan.FromMilliseconds(historyMs);
+            options.RequestLogCapacity = requestLogCapacity;
+        });
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Throws<OptionsValidationException>(() =>
+            provider.GetRequiredService<WorkbenchMetricsCollector>());
+    }
+
     [Fact]
     public void Embedded_resources_return_independent_streams()
     {
@@ -42,6 +66,19 @@ public sealed class CollectorTests
         var firstByte = first.ReadByte();
         Assert.Equal(0, second.Position);
         Assert.Equal(firstByte, second.ReadByte());
+    }
+
+    [Fact]
+    public void Embedded_dashboard_bounds_paused_request_buffer()
+    {
+        using var stream = EmbeddedAssets.GetResource("index.html");
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream);
+        var html = reader.ReadToEnd();
+
+        Assert.Contains("pausedBuffer = mergeEntries(pausedBuffer,", html);
+        Assert.Contains(".slice(0, MAX_LOG)", html);
+        Assert.DoesNotContain("pausedBuffer.reverse()", html);
     }
 
     private static List<RequestLogEntry> Drain(RequestLogCollector.RequestLogSubscription subscription)

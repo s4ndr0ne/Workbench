@@ -25,6 +25,7 @@ public sealed class RequestLogMiddleware
     private readonly string _workbenchPath;
     private readonly bool _captureBody;
     private static readonly string[] SkippedMethods = ["OPTIONS"];
+    private static readonly object PendingErrorLogKey = new();
 
     public RequestLogMiddleware(
         RequestDelegate next,
@@ -56,33 +57,6 @@ public sealed class RequestLogMiddleware
         };
     }
 
-    /// <summary>
-    /// Reads at most <see cref="MaxBodyBytes"/> from the stream and decodes it as UTF-8.
-    /// Returns the (possibly truncated) text and the number of bytes actually consumed.
-    /// </summary>
-    private static async Task<(string? Body, long Size)> ReadBodyAsync(Stream body, CancellationToken ct)
-    {
-        var buffer = new byte[MaxBodyBytes + 1];
-        var total = 0;
-        int read;
-        while (total < buffer.Length
-               && (read = await body.ReadAsync(buffer.AsMemory(total, buffer.Length - total), ct)) > 0)
-        {
-            total += read;
-        }
-
-        if (total == 0)
-            return (null, 0);
-
-        if (total > MaxBodyBytes)
-        {
-            var text = Encoding.UTF8.GetString(buffer, 0, (int)MaxBodyBytes) + "\n… (body truncated)";
-            return (text, total);
-        }
-
-        return (Encoding.UTF8.GetString(buffer, 0, total), total);
-    }
-
     private static string NormalizeBasePath(string path)
     {
         return string.IsNullOrWhiteSpace(path)
@@ -96,22 +70,25 @@ public sealed class RequestLogMiddleware
         var path = context.Request.Path.Value ?? "";
 
         if (Array.Exists(SkippedMethods, m => string.Equals(m, method, StringComparison.OrdinalIgnoreCase))
-            || context.Request.Path.StartsWithSegments(_workbenchPath))
+            || context.Request.Path.StartsWithSegments(_workbenchPath)
+            || context.Items.ContainsKey(PendingErrorLogKey))
         {
             await _next(context);
             return;
         }
 
-        // Buffer the request body so downstream can still read it.
+        // Capture only bytes read by the application, without starting body consumption here.
         string? requestBody = null;
         long requestSize = 0;
         var requestContentType = context.Request.ContentType ?? "";
 
+        RequestBodyCaptureStream? streamingCapture = null;
+        var originalBody = context.Request.Body;
+
         if (_captureBody && ShouldCaptureBody(context.Request, requestContentType))
         {
-            context.Request.EnableBuffering();
-            (requestBody, requestSize) = await ReadBodyAsync(context.Request.Body, context.RequestAborted);
-            context.Request.Body.Position = 0;
+            streamingCapture = new RequestBodyCaptureStream(originalBody, MaxBodyBytes);
+            context.Request.Body = streamingCapture;
         }
         else if (context.Request.ContentLength is > 0)
         {
@@ -119,12 +96,45 @@ public sealed class RequestLogMiddleware
         }
 
         var sw = Stopwatch.StartNew();
+        var failed = false;
 
         try
         {
             await _next(context);
         }
+        catch
+        {
+            failed = true;
+            throw;
+        }
         finally
+        {
+            if (streamingCapture is not null && ReferenceEquals(context.Request.Body, streamingCapture))
+                context.Request.Body = originalBody;
+
+            if (streamingCapture is not null)
+            {
+                requestBody = streamingCapture.Body;
+                requestSize = streamingCapture.BytesRead;
+            }
+
+            if (failed)
+            {
+                // Outer exception handlers decide the final status and may re-execute this pipeline.
+                context.Items[PendingErrorLogKey] = true;
+                context.Response.OnCompleted(() =>
+                {
+                    RecordEntry();
+                    return Task.CompletedTask;
+                });
+            }
+            else
+            {
+                RecordEntry();
+            }
+        }
+
+        void RecordEntry()
         {
             sw.Stop();
 
@@ -150,5 +160,129 @@ public sealed class RequestLogMiddleware
                 Math.Round(sw.Elapsed.TotalMilliseconds, 2),
                 requestSize);
         }
+    }
+}
+
+internal sealed class RequestBodyCaptureStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly byte[] _buffer;
+    private readonly System.Collections.BitArray? _capturedPositions;
+    private int _captured;
+
+    public RequestBodyCaptureStream(Stream inner, long maximumBytes)
+    {
+        _inner = inner;
+        _buffer = new byte[checked((int)maximumBytes + 1)];
+        if (inner.CanSeek)
+            _capturedPositions = new System.Collections.BitArray(_buffer.Length);
+    }
+
+    public long BytesRead { get; private set; }
+
+    public string? Body
+    {
+        get
+        {
+            if (_captured == 0)
+                return null;
+
+            var length = Math.Min(_captured, _buffer.Length - 1);
+            var body = Encoding.UTF8.GetString(_buffer, 0, length);
+            return _captured == _buffer.Length ? body + "\n… (body truncated)" : body;
+        }
+    }
+
+    public override bool CanRead => _inner.CanRead;
+    public override bool CanSeek => _inner.CanSeek;
+    public override bool CanWrite => _inner.CanWrite;
+    public override long Length => _inner.Length;
+    public override long Position { get => _inner.Position; set => _inner.Position = value; }
+    public override void Flush() => _inner.Flush();
+    public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+    public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+    public override void SetLength(long value) => _inner.SetLength(value);
+
+    private long ReadPosition => _inner.CanSeek ? _inner.Position : BytesRead;
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        var position = ReadPosition;
+        var read = _inner.Read(buffer, offset, count);
+        Capture(buffer.AsSpan(offset, read), position);
+        return read;
+    }
+
+    public override int Read(Span<byte> buffer)
+    {
+        var position = ReadPosition;
+        var read = _inner.Read(buffer);
+        Capture(buffer[..read], position);
+        return read;
+    }
+
+    public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        var position = ReadPosition;
+        var read = await _inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken);
+        Capture(buffer.AsSpan(offset, read), position);
+        return read;
+    }
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        var position = ReadPosition;
+        var read = await _inner.ReadAsync(buffer, cancellationToken);
+        Capture(buffer.Span[..read], position);
+        return read;
+    }
+
+    public override int ReadByte()
+    {
+        var position = ReadPosition;
+        var value = _inner.ReadByte();
+        if (value >= 0)
+            Capture(stackalloc byte[] { (byte)value }, position);
+        return value;
+    }
+
+    public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
+    public override void Write(ReadOnlySpan<byte> buffer) => _inner.Write(buffer);
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        _inner.WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+        _inner.WriteAsync(buffer, cancellationToken);
+
+    protected override void Dispose(bool disposing)
+    {
+        // The request pipeline owns the wrapped stream.
+    }
+
+    private void Capture(ReadOnlySpan<byte> data, long position)
+    {
+        if (data.IsEmpty)
+            return;
+
+        // Rewinds must not count the same body bytes twice.
+        BytesRead = Math.Max(BytesRead, position + data.Length);
+        if (position >= _buffer.Length)
+            return;
+
+        var start = (int)position;
+        var length = Math.Min(data.Length, _buffer.Length - start);
+        data[..length].CopyTo(_buffer.AsSpan(start));
+
+        if (_capturedPositions is null)
+        {
+            _captured = start + length;
+            return;
+        }
+
+        for (var i = start; i < start + length; i++)
+            _capturedPositions[i] = true;
+
+        // Only expose the contiguous prefix; forward seeks may leave unread gaps.
+        while (_captured < _buffer.Length && _capturedPositions[_captured])
+            _captured++;
     }
 }

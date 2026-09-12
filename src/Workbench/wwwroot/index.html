@@ -859,7 +859,7 @@
     ]);
     fillInfo($('runtime-info'), [
       ['Working set', proc.workingSetMb + ' MB'], ['Private memory', proc.privateMemoryMb + ' MB'], ['Virtual memory', proc.virtualMemoryMb + ' MB'],
-      ['Managed heap', fmtNum(rt.heapSizeMb, 1) + ' MB'], ['Committed', fmtNum(rt.totalBytesAllocatedMb, 1) + ' MB'],
+      ['Managed heap', fmtNum(rt.heapSizeMb, 1) + ' MB'], ['Total allocated', fmtNum(rt.totalBytesAllocatedMb, 1) + ' MB'],
       ['Threads', proc.threadCount], ['CPU (sampled)', fmtNum(rt.cpuUsagePercent, 1) + '%'],
     ]);
     fillInfo($('gc-info'), [
@@ -968,8 +968,8 @@
     const verb = ep.method === 'ANY' ? 'GET' : ep.method;
     const segments = ep.path.split(/(\{[^}]+\})/g).filter(Boolean);
     const urlHtml = segments.map(s => {
-      const m = /^\{(\w+)/.exec(s);
-      if (m) return '<input data-param="' + esc(m[1]) + '" placeholder="' + esc(s) + '" spellcheck="false" />';
+      const m = /^\{(\*{0,2})(\w+)/.exec(s);
+      if (m) return '<input data-param="' + esc(m[2]) + '" data-template="' + esc(s) + '" data-catch-all="' + m[1].length + '" placeholder="' + esc(s) + '" spellcheck="false" />';
       return '<span>' + esc(s) + '</span>';
     }).join('') + '<span class="qs">?<input id="b-query" placeholder="key=value&amp;…" spellcheck="false" /></span>';
     const verbHtml = ep.method === 'ANY'
@@ -989,7 +989,12 @@
     if (verbSel) verbSel.addEventListener('change', () => $('b-body-wrap').classList.toggle('hidden', !BODY_VERBS.includes(verbSel.value)));
     $('b-send').addEventListener('click', () => sendRequest(ep));
     $('b-curl').addEventListener('click', () => copyText(buildCurl(ep)));
-    b.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendRequest(ep); });
+    b.onkeydown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!$('b-send').disabled) sendRequest(ep);
+      }
+    };
     const first = b.querySelector('[data-param]'); if (first) first.focus();
   }
   function currentRequest(ep) {
@@ -997,7 +1002,9 @@
     let path = ep.path;
     document.querySelectorAll('#b-url [data-param]').forEach(inp => {
       const v = inp.value.trim();
-      path = path.replace(new RegExp('\\{' + inp.dataset.param + '(?:[:?*][^}]*)?\\}'), v ? encodeURIComponent(v) : '{' + inp.dataset.param + '}');
+      const catchAll = Number(inp.dataset.catchAll);
+      const value = catchAll === 2 ? v.split('/').map(encodeURIComponent).join('/') : encodeURIComponent(v);
+      path = path.replace(inp.dataset.template, () => v || catchAll ? value : '{' + inp.dataset.param + '}');
     });
     const qs = ($('b-query').value || '').trim().replace(/^\?/, '');
     const url = path + (qs ? '?' + qs : '');
@@ -1046,6 +1053,47 @@
   const MAX_LOG = 500, RENDER_LIMIT = 300;
   let reqLog = [], reqSeeded = false, paused = false, pausedBuffer = [];
   let logFilter = '', clsFilter = new Set(), openTrace = null;
+  let serverClock = null, clearCutoff = -Infinity, pendingClearAt = null;
+
+  const entryKey = e => JSON.stringify([e.traceId, e.timestampUtc]);
+  const timestampFraction = e => (/\.(\d+)/.exec(e.timestampUtc)?.[1] || '').padEnd(7, '0');
+  function mergeEntries(current, incoming) {
+    const entries = new Map();
+    for (const e of [...current, ...incoming]) {
+      if (new Date(e.timestampUtc).getTime() > clearCutoff) entries.set(entryKey(e), e);
+    }
+    return [...entries.values()].sort((a, b) => new Date(b.timestampUtc) - new Date(a.timestampUtc)
+      || timestampFraction(b).localeCompare(timestampFraction(a))).slice(0, MAX_LOG);
+  }
+  function receiveEntries(entries, live = false) {
+    if (paused) {
+      const visible = new Set(reqLog.map(entryKey));
+      pausedBuffer = mergeEntries(pausedBuffer, entries.filter(e => !visible.has(entryKey(e))));
+      $('log-hint').textContent = reqLog.length + ' captured · paused (' + pausedBuffer.length + ' queued)';
+    } else {
+      const newest = live ? entries[0] : null;
+      const canPrepend = newest && !logFilter && !clsFilter.size && !reqLog.some(e => entryKey(e) === entryKey(newest));
+      reqLog = mergeEntries(reqLog, entries);
+      if (canPrepend && reqLog[0] === newest) {
+        const box = $('log-rows');
+        if (box.firstElementChild && box.firstElementChild.classList.contains('log-empty')) box.innerHTML = '';
+        box.insertAdjacentHTML('afterbegin', rowHtml(newest, true));
+        while (box.children.length > RENDER_LIMIT * 2) box.removeChild(box.lastChild);
+        $('log-hint').textContent = reqLog.length + ' captured · live';
+      } else renderLog();
+      renderStats();
+    }
+  }
+  function updateServerClock(timestamp) {
+    const utc = Date.parse(timestamp);
+    if (!Number.isFinite(utc)) return;
+    const at = performance.now();
+    serverClock = { utc, at };
+    if (pendingClearAt != null) {
+      clearCutoff = utc - (at - pendingClearAt);
+      pendingClearAt = null;
+    }
+  }
 
   function passes(e) {
     if (clsFilter.size && !clsFilter.has(statusClass(e.statusCode).slice(7))) return false;
@@ -1115,17 +1163,6 @@
     chRpm.setData(times, [{ name: 'req', color: cssVar('--accent-2'), values: counts }]);
     drawSpark($('sp-rpm'), counts.slice(-12), cssVar('--accent-2'));
   }
-  function addEntry(e, live) {
-    if (reqLog.some(r => r.traceId === e.traceId && r.timestampUtc === e.timestampUtc)) return;
-    reqLog.unshift(e); if (reqLog.length > MAX_LOG) reqLog.length = MAX_LOG;
-    if (live && passes(e)) {
-      const box = $('log-rows');
-      if (box.firstElementChild && box.firstElementChild.classList.contains('log-empty')) box.innerHTML = '';
-      box.insertAdjacentHTML('afterbegin', rowHtml(e, true));
-      while (box.children.length > RENDER_LIMIT * 2) box.removeChild(box.lastChild);
-    }
-    $('log-hint').textContent = reqLog.length + ' captured · live';
-  }
   $('log-search').addEventListener('input', (e) => { logFilter = e.target.value.trim(); renderLog(); });
   $('log-chips').addEventListener('click', (e) => {
     const chip = e.target.closest('.chip'); if (!chip) return;
@@ -1137,10 +1174,21 @@
     paused = !paused;
     $('log-pause').innerHTML = paused ? '<svg><use href="#i-play"/></svg><span>Resume</span>' : '<svg><use href="#i-pause"/></svg><span>Pause</span>';
     $('log-pause').classList.toggle('active', paused);
-    if (!paused) { pausedBuffer.reverse().forEach(e => addEntry(e, false)); pausedBuffer = []; renderLog(); renderStats(); }
+    if (!paused) { receiveEntries(pausedBuffer); pausedBuffer = []; }
     else renderLog();
   });
-  $('log-clear').addEventListener('click', () => { reqLog = []; pausedBuffer = []; openTrace = null; renderLog(); renderStats(); });
+  $('log-clear').addEventListener('click', () => {
+    // Extrapolate server time with a monotonic clock, including while disconnected.
+    const at = performance.now();
+    if (serverClock) {
+      clearCutoff = Math.max(clearCutoff, serverClock.utc + at - serverClock.at,
+        ...reqLog.map(e => Date.parse(e.timestampUtc)), ...pausedBuffer.map(e => Date.parse(e.timestampUtc)));
+    } else {
+      pendingClearAt = at;
+      clearCutoff = Infinity; // Resolve a pre-connection clear when the first server clock arrives.
+    }
+    reqLog = []; pausedBuffer = []; openTrace = null; renderLog(); renderStats();
+  });
   $('log-rows').addEventListener('click', (e) => {
     const row = e.target.closest('.log-row'); if (!row) return;
     const trace = row.dataset.trace;
@@ -1159,25 +1207,25 @@
   const source = new EventSource('api/stream');
   source.addEventListener('overview', (evt) => {
     const data = JSON.parse(evt.data);
-    hideBanner(); setLive('live', 'Live'); setHealthPill(data.healthStatus);
+    hideBanner(); setLive('live', 'Live');
+    if (data.healthStatus != null) setHealthPill(data.healthStatus);
     renderOverview(data);
-    if (!reqSeeded) {
-      reqLog = (data.recentRequests || []).slice().sort((a, b) => new Date(b.timestampUtc) - new Date(a.timestampUtc));
-      reqSeeded = true; renderLog();
-    }
-    renderStats();
+    updateServerClock(data.serverTimeUtc);
+    reqSeeded = true;
+    if (Array.isArray(data.recentRequests)) receiveEntries(data.recentRequests);
+    else if (!paused) renderStats();
   });
-  source.addEventListener('health', (evt) => renderHealth(JSON.parse(evt.data)));
-  source.addEventListener('request', (evt) => {
-    const e = JSON.parse(evt.data);
-    if (paused) { pausedBuffer.push(e); $('log-hint').textContent = reqLog.length + ' captured · paused (' + pausedBuffer.length + ' queued)'; return; }
-    addEntry(e, true); renderStats();
+  source.addEventListener('health', (evt) => {
+    const report = JSON.parse(evt.data);
+    setHealthPill(report.status);
+    renderHealth(report);
   });
+  source.addEventListener('request', (evt) => receiveEntries([JSON.parse(evt.data)], true));
   source.onopen = () => { hideBanner(); setLive('live', 'Live'); };
   source.onerror = () => { setLive('reconnecting', 'Reconnecting'); showBanner('Lost connection to the Workbench stream. The browser is reconnecting automatically…'); };
 
   // Refresh relative stats every few seconds even without new events.
-  setInterval(() => { if (reqSeeded) renderStats(); }, 5000);
+  setInterval(() => { if (reqSeeded && !paused) renderStats(); }, 5000);
 
   loadEndpoints();
   route();
