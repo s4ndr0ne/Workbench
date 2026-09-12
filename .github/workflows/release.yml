@@ -87,7 +87,7 @@ jobs:
             --skip-duplicate
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Workbench ${{ steps.version.outputs.version }}
           body_path: release-notes.md
