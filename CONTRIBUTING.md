@@ -25,7 +25,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The `Release` workflow builds, tests, packs with the tag version, pushes the package to GitHub Packages, and creates a GitHub Release with the changelog section and `.nupkg` attached. Download the `.nupkg` from the GitHub Release and upload it to NuGet.org manually.
+The `Release` workflow builds, tests, packs with the tag version, and creates a GitHub Release with the changelog section, `.nupkg`, and `.snupkg` attached. Download the packages from the GitHub Release and publish them manually to the desired registry.
 
 ## Pull requests
 

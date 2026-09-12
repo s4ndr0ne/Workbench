@@ -7,7 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 - The NuGet package ID is now `s4ndr0ne.Workbench`.
-- NuGet.org publishing is now manual; releases continue to publish artifacts and GitHub Packages automatically.
+- Package publishing is now manual; releases only attach the generated packages to the GitHub Release.
 
 ## [0.1.0] - 2026-09-12
 
@@ -29,7 +29,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Metrics sampling starts with the host instead of on the first dashboard request; uptime uses the real process start time.
 - Managed heap size no longer reads 0 MB before the first garbage collection.
 - Dashboard escapes all server-provided strings before rendering.
-- CI workflow (build + test on Linux/Windows) and tag-driven release workflow (NuGet + GitHub Packages + GitHub Release).
+- CI workflow (build + test on Linux/Windows) and tag-driven workflow with downloadable GitHub Release artifacts.
 
 [Unreleased]: https://github.com/s4ndr0ne/Workbench/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/s4ndr0ne/Workbench/releases/tag/v0.1.0

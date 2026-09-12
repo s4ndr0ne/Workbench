@@ -77,15 +77,6 @@ jobs:
             echo '```'
           } >> "$FILE"
 
-      - name: Push to GitHub Packages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          dotnet nuget push "artifacts/*.nupkg" \
-            --api-key "$GITHUB_TOKEN" \
-            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
-            --skip-duplicate
-
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
