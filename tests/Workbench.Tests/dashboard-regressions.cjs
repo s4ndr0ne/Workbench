@@ -167,6 +167,16 @@ test('constrained and optional parameters retain their existing behavior with ca
   assert.match(app.buildCurl(ep), /https:\/\/example\.test\/files\/a\/b\?page=2/);
 });
 
+test('regex route constraints containing quantifier braces produce usable GET URLs', () => {
+  const app = dashboard();
+  const ep = { path: '/codes/{campo:regex(^[A-Z]{2}[0-9]{1,4}$)}', method: 'GET' };
+  app.renderBuilder(ep);
+  assert.equal(app.inputs().length, 1);
+  assert.equal(app.inputs()[0].dataset.param, 'campo');
+  app.inputs()[0].value = 'AB123';
+  assert.equal(app.currentRequest(ep).url, '/codes/AB123');
+});
+
 test('cURL safely quotes URL, header, and body apostrophes', () => {
   const app = dashboard();
   app.renderBuilder({ path: '/items/{id}', method: 'POST' });

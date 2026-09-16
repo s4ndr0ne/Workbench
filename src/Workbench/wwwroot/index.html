@@ -346,11 +346,17 @@
   .ep-empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 13px; }
 
   .builder-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-  .builder-head .url { flex: 1; display: flex; align-items: center; gap: 0; flex-wrap: wrap; font-family: var(--mono); font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 10px; min-height: 36px; }
-  .builder-head .url input { background: transparent; border: 0; outline: none; color: var(--accent-2); font-family: var(--mono); font-size: 13px; padding: 3px 6px; margin: 0 1px; border-bottom: 1px dashed var(--accent-2); min-width: 60px; width: 100px; }
-  .builder-head .url input:focus { border-bottom-style: solid; }
-  .builder-head .url .qs { color: var(--muted); }
-  .builder-head .url .qs input { color: var(--text-2); border-bottom: 1px dashed var(--border-strong); min-width: 140px; width: 180px; }
+  .builder-head .url { flex: 1; display: grid; gap: 12px; font-family: var(--mono); font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; min-width: 0; }
+  .route-preview { display: block; color: var(--text-2); overflow-wrap: anywhere; line-height: 1.5; }
+  .route-preview .p { color: var(--accent-2); }
+  .route-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .route-param { display: grid; gap: 5px; min-width: 0; }
+  .route-param label { color: var(--muted); font-family: var(--font); font-size: 10.5px; font-weight: 700; letter-spacing: .45px; text-transform: uppercase; }
+  .route-param input, .route-query input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; outline: none; color: var(--accent-2); font-family: var(--mono); font-size: 12.5px; padding: 7px 8px; min-width: 0; }
+  .route-param input:focus, .route-query input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  .route-query { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; color: var(--muted); font-family: var(--font); font-size: 11px; font-weight: 600; }
+  .route-query input { color: var(--text-2); }
+  .route-empty { color: var(--muted); font-family: var(--font); font-size: 11px; }
   .builder-head select { width: auto; font-family: var(--mono); font-weight: 700; font-size: 12px; }
   .builder-body { padding: 14px 16px; display: grid; gap: 12px; }
   .builder-body label { font-size: 11.5px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 6px; }
@@ -936,7 +942,30 @@
       $('ep-list').innerHTML = '<div class="ep-empty">Unable to load endpoints: ' + esc(err.message || err) + '</div>';
     }
   }
-  function pathHtml(p) { return esc(p).replace(/\{[^}]+\}/g, m => '<span class="p">' + m + '</span>'); }
+  function routeSegments(path) {
+    const segments = [];
+    let textStart = 0;
+    let parameterStart = -1;
+    let braceDepth = 0;
+    for (let i = 0; i < path.length; i++) {
+      if (path[i] === '{') {
+        if (braceDepth === 0) {
+          if (textStart < i) segments.push({ text: path.slice(textStart, i) });
+          parameterStart = i;
+        }
+        braceDepth++;
+      } else if (path[i] === '}' && braceDepth > 0) {
+        braceDepth--;
+        if (braceDepth === 0) {
+          segments.push({ parameter: path.slice(parameterStart + 1, i), template: path.slice(parameterStart, i + 1) });
+          textStart = i + 1;
+        }
+      }
+    }
+    if (textStart < path.length) segments.push({ text: path.slice(textStart) });
+    return segments;
+  }
+  function pathHtml(p) { return routeSegments(p).map(s => s.parameter ? '<span class="p">' + esc(s.template) + '</span>' : esc(s.text)).join(''); }
   function renderEndpointList() {
     const box = $('ep-list');
     const q = epFilter.toLowerCase();
@@ -966,12 +995,17 @@
   function renderBuilder(ep) {
     const b = $('builder');
     const verb = ep.method === 'ANY' ? 'GET' : ep.method;
-    const segments = ep.path.split(/(\{[^}]+\})/g).filter(Boolean);
-    const urlHtml = segments.map(s => {
-      const m = /^\{(\*{0,2})(\w+)/.exec(s);
-      if (m) return '<input data-param="' + esc(m[2]) + '" data-template="' + esc(s) + '" data-catch-all="' + m[1].length + '" placeholder="' + esc(s) + '" spellcheck="false" />';
-      return '<span>' + esc(s) + '</span>';
-    }).join('') + '<span class="qs">?<input id="b-query" placeholder="key=value&amp;…" spellcheck="false" /></span>';
+    const segments = routeSegments(ep.path);
+    const routeHtml = segments.map(s => '<span' + (s.parameter ? ' class="p"' : '') + '>' + esc(s.text || s.template) + '</span>').join('');
+    const params = segments.filter(s => s.parameter).map(s => {
+      const m = /^(\*{0,2})(\w+)/.exec(s.parameter);
+      if (!m) return '';
+      return '<div class="route-param"><label for="b-param-' + esc(m[2]) + '">' + esc(m[2]) + '</label>'
+        + '<input id="b-param-' + esc(m[2]) + '" data-param="' + esc(m[2]) + '" data-template="' + esc(s.template) + '" data-catch-all="' + m[1].length + '" placeholder="' + esc(s.template) + '" spellcheck="false" /></div>';
+    }).join('');
+    const urlHtml = '<div class="route-preview" id="b-route-preview">' + routeHtml + '</div>'
+      + (params ? '<div class="route-params">' + params + '</div>' : '<div class="route-empty">This endpoint has no route parameters.</div>')
+      + '<div class="route-query"><span>Query</span><input id="b-query" placeholder="key=value&amp;…" spellcheck="false" /></div>';
     const verbHtml = ep.method === 'ANY'
       ? '<select class="input" id="b-verb">' + VERBS.map(v => '<option' + (v === verb ? ' selected' : '') + '>' + v + '</option>').join('') + '</select>'
       : '<span class="method ' + methodClass(ep.method) + '" style="padding:6px 10px;font-size:12px" id="b-verb-static">' + esc(ep.method) + '</span>';
@@ -996,6 +1030,14 @@
       }
     };
     const first = b.querySelector('[data-param]'); if (first) first.focus();
+    [...document.querySelectorAll('#b-url [data-param]'), $('b-query')].forEach(input => input.addEventListener('input', () => {
+      const preview = $('b-route-preview');
+      if (preview) preview.innerHTML = segments.map(s => {
+        if (!s.parameter) return esc(s.text || s.template);
+        const value = Array.from(document.querySelectorAll('#b-url [data-param]')).find(candidate => candidate.dataset.template === s.template)?.value.trim();
+        return '<span class="p">' + esc(value || s.template) + '</span>';
+      }).join('') + (($('b-query').value || '').trim() ? '?' + esc($('b-query').value.trim().replace(/^\?/, '')) : '');
+    }));
   }
   function currentRequest(ep) {
     const verb = $('b-verb') ? $('b-verb').value : ep.method;
