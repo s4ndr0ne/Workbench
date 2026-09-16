@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Reconciled request history after SSE reconnects with bounded deduplication, ordering, and pause/clear handling.
 - Bounded the browser request queue while live updates are paused and preserved request ordering on resume.
 - Reduced SSE traffic by sending request history only in the initial overview event.
+- Coalesced health-check execution across concurrent SSE clients and cached reports for the metrics interval.
 - Corrected total allocation and cumulative GC pause metrics.
 - Replaced blocking CPU sampling with non-overlapping process-time sampling.
 - Improved endpoint discovery for catch-all routes, complex constraints, and paths sharing the dashboard prefix.

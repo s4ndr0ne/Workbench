@@ -45,6 +45,7 @@ public static class WorkbenchBuilderExtensions
             .ValidateOnStart();
 
         services.TryAddSingleton<WorkbenchMetricsCollector>();
+        services.TryAddSingleton<WorkbenchHealthReportCache>();
         services.TryAddSingleton(sp =>
         {
             var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkbenchOptions>>().Value;

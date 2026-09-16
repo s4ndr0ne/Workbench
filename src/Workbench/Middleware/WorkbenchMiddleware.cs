@@ -196,7 +196,7 @@ public sealed class WorkbenchMiddleware
                     "overview",
                     await BuildOverview(context, includeHealthStatus: !options.EnableHealthReport));
                 if (options.EnableHealthReport)
-                    await WriteEvent(context, "health", await BuildHealthReport(context));
+                    await WriteEvent(context, "health", await BuildHealthReport(context, useCache: true));
             }
 
             while (!context.RequestAborted.IsCancellationRequested)
@@ -233,7 +233,7 @@ public sealed class WorkbenchMiddleware
                             includeRecentRequests: false,
                             includeHealthStatus: !options.EnableHealthReport));
                     if (options.EnableHealthReport)
-                        await WriteEvent(context, "health", await BuildHealthReport(context));
+                        await WriteEvent(context, "health", await BuildHealthReport(context, useCache: true));
 
                     timerTask = timer.WaitForNextTickAsync(context.RequestAborted).AsTask();
                 }
@@ -310,10 +310,24 @@ public sealed class WorkbenchMiddleware
         }
     }
 
-    private static async Task<HealthReportModel> BuildHealthReport(HttpContext context)
+    private static async Task<HealthReportModel> BuildHealthReport(HttpContext context, bool useCache = false)
     {
-        var service = context.RequestServices.GetService<HealthCheckService>();
-        if (service is null)
+        HealthReport? report;
+        if (useCache)
+        {
+            report = await context.RequestServices
+                .GetRequiredService<WorkbenchHealthReportCache>()
+                .GetAsync(context.RequestAborted);
+        }
+        else
+        {
+            var service = context.RequestServices.GetService<HealthCheckService>();
+            report = service is null
+                ? null
+                : await service.CheckHealthAsync(context.RequestAborted);
+        }
+
+        if (report is null)
         {
             return new HealthReportModel
             {
@@ -322,8 +336,6 @@ public sealed class WorkbenchMiddleware
                 Entries = Array.Empty<HealthEntry>(),
             };
         }
-
-        var report = await service.CheckHealthAsync(context.RequestAborted);
 
         var entries = report.Entries
             .Select(kv => new HealthEntry
