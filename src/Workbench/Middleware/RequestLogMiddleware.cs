@@ -64,6 +64,14 @@ public sealed class RequestLogMiddleware
             : "/" + path.Trim().Trim('/');
     }
 
+    private static string SanitizeForLog(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+
+        return value.Replace("\r", "\\r").Replace("\n", "\\n");
+    }
+
     public async Task InvokeAsync(HttpContext context)
     {
         var method = context.Request.Method;
@@ -154,9 +162,12 @@ public sealed class RequestLogMiddleware
 
             _collector.Add(entry);
 
+            var safeMethod = SanitizeForLog(method);
+            var safePath = SanitizeForLog(path);
+
             _logger.LogDebug(
                 "{Method} {Path} -> {Status} in {Duration}ms body={BodyLen}",
-                method, path, context.Response.StatusCode,
+                safeMethod, safePath, context.Response.StatusCode,
                 Math.Round(sw.Elapsed.TotalMilliseconds, 2),
                 requestSize);
         }
