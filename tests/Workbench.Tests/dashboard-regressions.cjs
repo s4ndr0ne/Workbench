@@ -8,7 +8,9 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 
 const html = readFileSync(join(__dirname, '../../src/Workbench/wwwroot/index.html'), 'utf8');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const scriptMatch = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/i);
+assert.ok(scriptMatch, 'Expected inline <script> in index.html');
+const script = scriptMatch[1];
 const decode = value => value.replace(/&(amp|lt|gt|quot|#39);/g, (_, entity) => ({
   amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'",
 })[entity]);
